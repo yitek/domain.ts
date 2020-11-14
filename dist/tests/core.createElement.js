@@ -15,7 +15,7 @@
     }
     var self = {};
     var vnodes = basic.call(self);
-    console.log('<grid class="grid"></grid>', vnodes);
+    console.log('basic=> <grid class="grid"></grid>', vnodes);
     //-------------------
     function This() {
         return YA.createElement("grid", { class: this.css });
@@ -23,7 +23,7 @@
     var model = new YA.Schema();
     var builder = YA.schemaBuilder(model);
     vnodes = This.call(builder);
-    console.log('<grid class={this.css}></grid>', vnodes, model);
+    console.log('This=> <grid class={this.css}></grid>', vnodes, model);
     //-------------------
     function Vars() {
         var _a = YA.vars(2), item = _a[0], i = _a[1];
@@ -33,9 +33,6 @@
     model = new YA.Schema();
     builder = YA.schemaBuilder(model);
     vnodes = Vars.call(builder);
-    console.log('<grid class={this.css}></grid>', vnodes, model);
-    var fn = function () { };
-    Object.defineProperty(fn, 'length', { enumerable: true, configurable: true, writable: false, value: 'abc' });
-    debugger;
+    console.log('Vars=> <grid class={this.css}></grid>', vnodes, model);
 });
 //# sourceMappingURL=core.createElement.js.map

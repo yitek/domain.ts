@@ -4,7 +4,7 @@ function basic(){
 }
 let self = {}
 let vnodes = basic.call(self)
-console.log('<grid class="grid"></grid>',vnodes)
+console.log('basic=> <grid class="grid"></grid>',vnodes)
 
 //-------------------
 function This(){
@@ -13,7 +13,7 @@ function This(){
 let model = new YA.Schema();
 let builder = YA.schemaBuilder(model);
 vnodes = This.call(builder)
-console.log('<grid class={this.css}></grid>',vnodes,model)
+console.log('This=> <grid class={this.css}></grid>',vnodes,model)
 
 //-------------------
 function Vars(){
@@ -23,7 +23,5 @@ function Vars(){
 model = new YA.Schema();
 builder = YA.schemaBuilder(model)
 vnodes = Vars.call(builder)
-console.log('<grid class={this.css}></grid>',vnodes,model)
-var fn :any= function(){}
-Object.defineProperty(fn,'length',{enumerable:true,configurable:true,writable:false,value:'abc'})
-debugger
+console.log('Vars=> <grid class={this.css}></grid>',vnodes,model)
+
