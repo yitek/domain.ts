@@ -921,9 +921,12 @@ var __decorate = (this && this.__decorate) || function (decorators, target, key,
             if (!meta)
                 meta = resolveMeta(renderer);
             var rtInfo = new RuntimeInfo(meta, opts);
+            this._addRoot(rtInfo);
             return rtInfo;
         };
         Runtime.prototype._addRoot = function (root) {
+            if (root.parent)
+                throw new Exception('不是顶级控件，不可以挂载', root);
             this.roots.push(root);
             if (!this.timer) {
                 this.timer = setTimeout(function () { }, this.tick);
@@ -953,9 +956,9 @@ var __decorate = (this && this.__decorate) || function (decorators, target, key,
     function mount(container, opts, extra) {
         var t = typeof opts;
         if (t === 'function') {
-            debugger;
             var meta = resolveMeta(opts);
             var rt = new RuntimeInfo(meta, opts);
+            debugger;
             return rt.mount(container);
         }
         throw "not implement";
@@ -994,6 +997,7 @@ var __decorate = (this && this.__decorate) || function (decorators, target, key,
         return node;
     }
     function renderNode(tag, context) {
+        debugger;
         var descriptor = context.descriptor;
         var node = exports.platform.createElement(tag);
         var attrs = descriptor.attrs;
@@ -1006,12 +1010,13 @@ var __decorate = (this && this.__decorate) || function (decorators, target, key,
                 }
                 else {
                     exports.platform.setAttribute(node, attrName, value);
-                    (function (attrName, node, platform, component) {
-                        var _a;
-                        (_a = observable_1) === null || _a === void 0 ? void 0 : _a.subscribe(function (evt) {
-                            platform.setAttribute(node, attrName, evt.value);
-                        }, component);
-                    })(attrName, node, exports.platform, context.component);
+                    if (observable_1)
+                        (function (attrName, node, platform, component) {
+                            var _a;
+                            (_a = observable_1) === null || _a === void 0 ? void 0 : _a.subscribe(function (evt) {
+                                platform.setAttribute(node, attrName, evt.value);
+                            }, component);
+                        })(attrName, node, exports.platform, context.component);
                 }
             };
             for (var attrName in attrs) {
@@ -1052,7 +1057,7 @@ var __decorate = (this && this.__decorate) || function (decorators, target, key,
             return listener;
         if (!component)
             return fn;
-        listener = function () { return fn.apply(component, arguments); };
+        listener = function (evt) { return fn.call(component, evt, component); };
         constant(false, fn, '--listener', listener);
         return listener;
     }

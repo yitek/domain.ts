@@ -11,11 +11,11 @@
     Object.defineProperty(exports, "__esModule", { value: true });
     var YA = require("../YA.core");
     function view(states) {
-        function inputChanged(evt) {
+        function inputChanged(evt, states) {
             states.inputText = evt.target.value;
         }
         return YA.createElement("div", null,
-            YA.createElement("input", { type: 'text', value: states.inputText, onkeypress: inputChanged }),
+            YA.createElement("input", { type: 'text', value: states.inputText, onkeydown: inputChanged }),
             YA.createElement("span", null, states.inputText));
     }
     YA.mount(document.body, view);

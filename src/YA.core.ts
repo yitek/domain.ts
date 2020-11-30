@@ -1,7 +1,9 @@
+declare let YA
+///////////////////////////////////////////////////////////////
+// 一 JS机制的扩展部分
 
 ///////////////////////////////////////////////////////////////
 // 类型判断
-
 export function is_string(obj:any):boolean{
     return typeof obj ==="string";
 }
@@ -56,6 +58,16 @@ export function trim(text:any):string {
 const eastWordRegx:RegExp = /[-_](\w)/g;
 const firstUpperCaseRegx:RegExp = /^([A-Z])/g;
 const firstLowerCaseRegx:RegExp = /^([a-z])/g;
+
+/**
+ * 骆驼命名法
+ * 将连字号变为骆驼命名法
+ *
+ * @export
+ * @param {*} text
+ * @param {boolean} [mix] true是大写开头，大小写混写的格式
+ * @returns {string}
+ */
 export function camel(text:any,mix?:boolean):string{
     if (text===null || text===undefined) return "";
     let result:string = text.toString().replace(trimRegx,"").replace(eastWordRegx,(c:string)=>c.toUpperCase());
@@ -74,7 +86,7 @@ export function camel(text:any,mix?:boolean):string{
  * @param {*} token 开始标记字符串
  * @returns {boolean}
  */
-export function startWith(text:any,token:any) :boolean {
+export function startsWith(text:any,token:any) :boolean {
     if(!text) return false;
     if(token===undefined || token===null) return false;
     return text.toString().indexOf(token.toString())===0;
@@ -89,7 +101,7 @@ export function startWith(text:any,token:any) :boolean {
  * @param {*} token 结束标记字符串
  * @returns {boolean}
  */
-export function endWith(text:any, token :any) :boolean{
+export function endsWith(text:any, token :any) :boolean{
     if(!text) return false;
     if(token===undefined || token===null) return false;
     text = text.toString();
@@ -147,6 +159,8 @@ export function array_remove(arr:any[],item:any):boolean{
 ///////////////////////////////////////
 // 对象处理
 
+
+
 export function deepClone(obj:any,_clones?:any[]){
     const t = typeof obj;
     if(t==='object'){
@@ -182,15 +196,8 @@ export let inherit = (function () {
 })();
 
 
-export function create(ctor:{new(...args):any},args?:any[]|boolean):any{
-    var res = Object.create(ctor.prototype)
-    if(args===true){
-        args =[]
-        //TODO: 依赖注入
-    }
-    ctor.apply(res, args || [])
-    return res
-}
+//////////////////////////////////////////////////////////
+// 类/对象标注
 
 export function accessable(desc:any,target?,name?,value?){
     // 标记用法 @notation() 
@@ -258,11 +265,231 @@ export function constant(enumerable?:boolean,target?,name?,value?){
     return accessable({enumerable:enumerable!==false,writable:false,configurable:true},target,name,value)
 }
 
+
+export function nop(){}
+
+
+
 export class Exception extends Error{
     constructor(msg,detail?:any){
         console.error(msg,detail);
         super(msg);
         if(detail)for(let n in detail) this[n] = detail[n];
+    }
+}
+const dispose = function(handler?){
+    if(handler===undefined){
+        const disposeHandlers = this['--disposes']
+        if(disposeHandlers){
+            for(const i in disposeHandlers){
+                disposeHandlers[i].call(this,this)
+            }
+        }
+        Object.defineProperty(this,'--disposes',{enumerable:false,configurable:false,writable:false,value:null})
+        Object.defineProperty(this,'$disposed',{enumerable:false,configurable:false,writable:false,value:true})
+        return this
+    }
+    let disposeHandlers = this['--disposes']
+    if(disposeHandlers===null){
+        handler.call(this,this)
+        return this
+    }
+    if(disposeHandlers===undefined) Object.defineProperty(this,'--disposes',{enumerable:false,configurable:true,writable:false,value: disposeHandlers=[]})
+    disposeHandlers.push(handler)
+    return this
+
+}
+export function disposable(target){
+    Object.defineProperty(target,'$dispose',{enumerable:false,configurable:false,writable:true,value:dispose})
+}
+export class Disposiable{
+    $disposed?:boolean
+    $dispose(callback?){
+        throw 'abstract method'
+    }
+}
+disposable(Disposiable.prototype)
+//////////////////////////////////////////////////////////////////
+// 对象创建与注入
+//
+@constant(false)
+export class Scope<T> extends Disposiable{
+    '$super'?:Scope<T>;
+    '$name'?:string;
+    
+    constructor(inital:{[name:string]:T},name?:string,superScope?:Scope<T>){
+        super()
+        if(inital) for(const n in inital) this[n] = inital[n]
+        constant(false,this,'$name',name)
+        constant(false,this,'$supper',superScope)
+    }
+    $fetch(key:string,factory?:(key:string)=>T):T{
+        let item = this[key]
+        if(item===undefined && this['$super']) item = this.$super.$fetch(key)
+        if(item===undefined && factory) {
+            this[key]= item = factory(key)
+        }
+        return item
+    }
+    $get(key:string ,factory?:(key:string)=>T){
+        let item = this[key]
+        if(item===undefined && factory) {
+            this[key]= item = factory(key)
+        }
+        return item
+    }
+    $set(key:string, item:T):Scope<T>{
+        if(key[0]==='$') throw new Exception('$开头的作为保留属性，不可以使用')
+        this[key] = item
+        return this
+    }
+    $createScope(name?:string|{[name:string]:T},inital?:{[name:string]:T}):Scope<T>{
+        if(inital) return new Scope<T>(inital,name as string,this)
+        if(typeof name==='object') return new Scope<T>(name,undefined,this)
+        return new Scope<T>(undefined,undefined,this)
+    }
+    
+    static createRoot<T>(name?:string|{[name:string]:T},inital?:{[name:string]:T}){
+        if(inital) return new Scope<T>(inital,name as string)
+        if(typeof name==='object') return new Scope<T>(name,'<ROOT-SCOPE>')
+        return new Scope<T>(undefined,'<ROOT-SCOPE>')
+    }
+}
+export type TInjectFactory = (name:string,scope:InjectScope,target?:any)=>any
+@constant(false)
+export class InjectScope extends Scope<TInjectFactory>{
+    constructor(inital:{[name:string]:TInjectFactory},name?:string,superScope?:InjectScope){
+        super(inital,name, superScope)
+    }
+    $resolve(name:string,context?:any):any{
+        const factory :TInjectFactory = this.$fetch(name)
+        if(factory) return factory(name,this,context)
+    }
+    $register(name:string, ctor:{new(...args):any},singleon?:boolean):Activator{
+        if(this[name]) throw new Exception('已经注册过该依赖项:' + name)
+        const activator = Activator.fetch(ctor)
+        let instance 
+        const factory = (name,scope,context)=>{
+            if(singleon && instance!==undefined) return instance
+            let inst = activator.createInstance(scope)
+            if(inst && typeof inst.$dispose==='function') this.$dispose(()=>inst.$dispose())
+            if(singleon) instance = inst
+            return inst
+        }
+        this.$set(name, factory)
+        return activator
+    }
+    $const(name:string, value:any):InjectScope{
+        if(this[name]) throw new Exception('已经注册过该依赖项:' + name)
+        this.$set(name,(name,scope,context)=>value)
+        return this
+    }
+    $factory(name:string, factory : any):InjectScope{
+        if(this[name]) throw new Exception('已经注册过该依赖项:' + name)
+        if(typeof factory !=='function'){
+            this[name] = (name,scope,target)=>factory
+        }else this[name] = factory
+        return this
+    }
+}
+export class Activator{
+    dependenceArgs:string[]
+    dependenceProps:{[propname:string]:string}
+    constructor(public ctor:{new(...args):any}){
+
+    }
+    prop(propname:string|{[pname:string]:string}|string[],depname?:string):Activator{
+        if(!this.dependenceProps) this.dependenceProps={}
+        if(depname===undefined){
+            if(typeof propname==='object') {
+                if(is_array(propname)) for(const i in propname as string[]) this.prop(depname[i],depname[i])
+                else for(const pname in propname as {[pname:string]:string}) this.prop(pname,depname[pname])
+            } else depname = propname
+        }
+        propname = (propname as string).replace(trimRegx,'')
+        depname = depname.replace(trimRegx,'')
+        if(!propname || depname) throw new Exception('依赖必须指定属性名/依赖名')
+        this.dependenceProps[propname] = depname
+        return this
+    }
+    createInstance(args:InjectScope|any[],constructing?:any,constructed?:any){
+        let thisInstance:any = Object.create(this.ctor.prototype)
+        if(constructing)  constructing(thisInstance)
+        let retInstance
+        if(args instanceof InjectScope){
+            retInstance = createFromInjection(args as InjectScope,thisInstance,this)
+        }else {
+            retInstance = this.ctor.apply(retInstance, args || [])
+        }
+        if(retInstance===undefined) retInstance = thisInstance
+        if(constructed)  {
+            const justified = constructed(thisInstance,this.ctor)
+            if(justified!==undefined) retInstance = justified
+        } 
+        return retInstance
+    }
+    static fetch(ctorOrProto:any, parseArgs?:boolean):Activator{
+        if(!ctorOrProto) return undefined
+        let activator:Activator = ctorOrProto['--activator']
+        if(!activator){
+            const t = typeof ctorOrProto
+            if(t==='function'){
+                activator = new Activator(ctorOrProto as {new(...arg):any})
+            }else if(t==='object'){
+                const ctor = function(){}
+                activator = new Activator(ctor as any as {new(...arg):any})
+                activator.dependenceArgs = []
+            }
+            Object.defineProperty(ctorOrProto,'--activator',{enumerable:false,configurable:false,writable:false,value:activator})
+        }
+        if(parseArgs && !activator.dependenceArgs) parseDepdenceArgs(activator)
+        return activator
+    }
+}
+function parseDepdenceArgs(activator:Activator){
+    const code = activator.ctor.toString()
+    const start = code.indexOf('(')
+    const end = code.indexOf(')',start)
+    const argsText = code.substring(start+1,end-1)
+    const argslist = argsText.split(',')
+    const args = []
+    for(const  i in argslist) args.push(argslist[i].replace(trimRegx,''))
+    activator.dependenceArgs = args
+}
+function createFromInjection(scope:InjectScope,selfInstance:any,activator:Activator){
+    if(!activator.dependenceArgs) parseDepdenceArgs(activator)
+
+    if(this.props && this.props.length){
+        for(const propname in this.props){
+            const depname = this.props[propname]
+            const propValue = scope.$resolve(depname)
+            selfInstance[propname] = propValue
+        }
+    }
+    if(this.args && this.args.length){
+        const args = []
+        for(const i in this.args){
+            const name = this.args[i]
+            const argValue = scope.$resolve(name)
+            args.push(argValue)
+        }
+        return this.ctor.apply(selfInstance,args)
+    }else {
+        return this.ctor.call(selfInstance)
+    }
+}
+
+export function injectable(ctorOrProto?:any){
+    const t = typeof ctorOrProto
+    if(t==='function' || t==='object') {
+        return Activator.fetch(ctorOrProto,true)
+    }
+    return function(target,name?){
+        const activator = Activator.fetch(ctorOrProto)
+        if(name!==undefined) {
+            activator.prop(name,ctorOrProto)
+        }
+        return target
     }
 }
 
@@ -339,67 +566,73 @@ function buildSchemaInfo(){
     return {paths,root}
 }
 
-const schemaBuilderTrigger = {
-    get(target: Schema,propname:string){
+const rootStatesTraps = {
+    get(target: {inst:any,schema:Schema},propname:string){
+        if(!target.inst) return target.inst[propname]
         if(propname[0]==='$') {
-            if(propname==='$schema') return target;
+            if(propname==='$schema') return target.schema;
             return target[propname];
         }
-        return new Proxy(target.$prop(propname),schemaBuilderTrigger);
+        return new Proxy(target.schema.$prop(propname),memberStatesTraps);
     },
-    set(target:Schema,propname:string){
+    set(target:{inst:any,schema:Schema},propname:string,value:any){
+        if(!target.inst) {
+            target.inst[propname] = value
+            return
+        } 
+        throw new Exception('schemaBuilder不可以在schemaBuilder上做赋值操作');
+    }
+};
+const memberStatesTraps = {
+    get(schema: Schema,propname:string){
+        if(propname[0]==='$') {
+            if(propname==='$schema') return schema;
+            return schema[propname];
+        }
+        return new Proxy(schema.$prop(propname),memberStatesTraps);
+    },
+    set(target:Schema,propname:string,value:any){
         throw new Exception('schemaBuilder不可以在schemaBuilder上做赋值操作');
     }
 };
 declare let Proxy;
-export function schemaBuilder(target?: Schema){
-    target || (target = new Schema());
-    return new Proxy(target,schemaBuilderTrigger);
+export function schemaProxy(target:{inst:any,schema:Schema}|Schema){
+    if(!target || target instanceof Schema) return new Proxy(new Schema(),memberStatesTraps)
+    return new Proxy(target,rootStatesTraps);
 }
+
 
 ////////////////////////////////////
 // createElement
 
-export class NodeDescriptor{
+export type TNodeDescriptor = {
     tag?: string;
     content?: string| Schema | TObservable;
     component?: any;
     attrs?: {[name:string]:any};
-    children?: NodeDescriptor[];
-    constructor(tag:string,attrs?: {[name:string]:any}){
-        if(attrs===NodeDescriptor){
-            this.content = tag;
-        }else{
-            this.tag = tag;
-            this.attrs = attrs;
-        }
-    }
-    appendChild(child:any):NodeDescriptor{
-        const children = this.children || (this.children=[])
-        if(child instanceof NodeDescriptor){
-            children.push(child)
-        }else children.push(new NodeDescriptor(child,NodeDescriptor))
-        return this;
-    }
-    public static invoke(fn:Function){
-        
-    }
+    children?: TNodeDescriptor[];
 }
 
-function _createElement(tag:string,attrs:{[name:string]:any}):NodeDescriptor{
-    const vnode:NodeDescriptor = new NodeDescriptor(tag,attrs)
+let tempCreateElementFn
+function _createElement(tag:string,attrs:{[name:string]:any}):TNodeDescriptor{
+    if(tempCreateElementFn) return tempCreateElementFn.apply(this,arguments)
+    const vnode:TNodeDescriptor = {
+        tag:tag,attrs:attrs
+    }
     if(arguments.length>2){
-        vnode.children = [];
+        let children = [];
         for(let i =2,j=arguments.length;i<j;i++){
             let child = arguments[i]
-            if(child) vnode.appendChild(child)
+            if(child) children.push(child)
         }
+        if(children.length) vnode.children = children
     }
 
     return vnode;
 }
 
-export const createElement :(tag:string,attrs:{[index:string]:any},...args:any[])=>NodeDescriptor = _createElement;
+export const createElement :(tag:string,attrs:{[index:string]:any},...args:any[])=>TNodeDescriptor = _createElement;
+
 
 let currentContext;
 export function vars(count?:number|{[index:string]:any}):any{
@@ -414,29 +647,29 @@ export function vars(count?:number|{[index:string]:any}):any{
         for(let i =0,j=count;i<j;i++){
             let schema = new Schema(undefined,prefix +(++varnum))
             context[schema.$name] = schema
-            let schemaProxy = schemaBuilder(schema)
-            result.push(schemaProxy);
+            let proxy = schemaProxy(schema)
+            result.push(proxy);
         }
     }else if(t==='object'){
         result = {};
         for(let n in count as any){
             let schema = new Schema(count[n],prefix + n)
             context[schema.$name] = schema
-            let schemaProxy = schemaBuilder(schema)
-            result[n] =schemaProxy;
+            let proxy = schemaProxy(schema)
+            result[n] = proxy;
         }
     }else if(arguments.length===0){
         let schema = new Schema(undefined,prefix +(++varnum))
         context[schema.$name] = schema
-        result = schemaBuilder(schema)
+        result = schemaProxy(schema)
     }else{
         result={};
         for(let i =0,j=arguments.length;i<j;i++){
             let name = prefix + arguments[i];
             let schema = new Schema(undefined,name);
             context[schema.$name] = schema
-            let schemaProxy = schemaBuilder(schema);
-            result[name]=schemaProxy;
+            let proxy = schemaProxy(schema);
+            result[name]=proxy;
         }
     }
     context[tmpNameIndex] = varnum
@@ -684,152 +917,141 @@ function arrayUpdate(bubble?:boolean,src?:TObservableEvent,isRemoved?:boolean):O
     }
     return this
 }
-@constant(false)
-export class Scope{
-    private '--parent'?:Scope;
-    private '--this'?:TObservable;
-    private '--name'?:string;
-    constructor(parentOrThis:Scope|TObservable,name?:string){
-        if(parentOrThis instanceof Scope) {
-            constant(false,this,'--parent',parentOrThis)
-            constant(false,this,'--this',parentOrThis['--ya-this'])
-        }else{
-            constant(false,this,'--this',parentOrThis)
-        }
-        constant(false,this,'--name',name)
-    }
-    $observable(schema:Schema,inital?:any,deepSearch?:boolean):TObservable{
-        const paths = schema.$paths()
-        const name = paths[0]
-        let scope:Scope = this
-        let root:TObservable
-        if(deepSearch===false){
-            root = scope[name]
-            if(!root){
-                let rootSchema = schema.$root()
-                root = this[name] = new Observable(inital,rootSchema,undefined,rootSchema.$name).$observable;
-            }
-        }else{
-            while(scope){
-                root = scope[name]
-                if(root) break
-                scope = scope["--parent"]
-            }
-        }
-        
-        let result = root
-        for(let i=1,j=paths.length;i<j;i++){
-            result = result[paths[i]]
-            if(!result) debugger
-        }
-        
-        return result
-        
 
-    }
-    $createScope(name?:string):Scope{
-        return new Scope(this,name)
-    }
-}
 
 //////////////////////////////
 // meta
+// 控件元数据
+// 所有控件都有
 export type TComponent = any
 
 export type TMeta = {
-    resolved:boolean
+    resolved?:boolean
     tag?:string
-    renderer:(state:any,sender?:any)=>any
-    ctor:{new(...args):TComponent}
-    schema:Schema
-    descriptor:NodeDescriptor
-    props?:string[]
+    ctor?:{new(...args):TComponent}
+    scopeSchema?:Schema,
+    modelSchema?:Schema,
+    vnode?:TNodeDescriptor
+    props?:{[name:string]:Schema}
 }
 const metas:{[tag:string]:TMeta} = {}
+const componentRTToken = '--'
 
 function resolveMeta(template:Function,meta?:TMeta):TMeta{
-    let schema = new Schema(undefined,'--this')
-    const builder = schemaBuilder(schema)
-    let descriptor:NodeDescriptor,renderer,ctor
-    if(typeof template.prototype.render==='function'){
-        ctor = template
-        descriptor = template.prototype.render.call(builder,builder)
-        renderer = (component,scope)=>render({
-            descriptor,scope,component
-        })
-    }else{
-        // 看直接调用是否会返回 NodeDescriptor
-        try{ descriptor = template.call(builder,builder) }catch{
-            descriptor=undefined;schema = undefined
-        }
-        if(descriptor!==undefined){
-            ctor = inherit(function(){Component.call(this)},Component)
-            renderer = (component,scope)=>render({
-                descriptor,scope,component
-            }) 
-        } else {
-            let inst = new (template as any)()
-            if(typeof inst.render==='function'){
-                try{
-                    descriptor = inst.render.call(builder,builder)
-                }catch{
-                    descriptor = undefined; 
-                    schema = undefined
-                }
-                if(descriptor){
-                    ctor = inst
-                    renderer = (component,scope)=>render({
-                        descriptor,scope,component
-                    }) 
+    const fn = template
+    meta ||(meta={})
+    return meta
+}
+export type TCreationContext = {
+
+}
+export class Meta{
+    tagName?:string
+    ctor:{new(...args):TComponent}
+    scopeSchema?:Schema
+    modelSchema?:Schema
+    propnames?:string[]
+    vnode?:TNodeDescriptor
+    
+    constructor(fn:Function,propnames:string[],tag?:string){
+        this.propnames = propnames
+        this.tagName = tag
+        const scopeSchema = this.scopeSchema = new Schema()
+        const modelSchema = this.modelSchema = scopeSchema.$prop('--model')
+        
+        const modelSchemaProxy = schemaProxy(modelSchema)
+        let descriptor:TNodeDescriptor
+        let ctor:any,inst:any
+        activate(fn,[modelSchemaProxy],{
+            afterConstruct:(ret,inst,fn)=>{
+                // 返回的是vnode,说明是个函数
+                if(ret!==undefined && !(ret instanceof fn)){
+                    descriptor = ret
+                    ctor = ((ctor,nop)=>function(model){
+                        tempCreateElementFn = nop
+                        ctor.call(model,this)
+                        tempCreateElementFn = undefined
+                    })(fn,nop)
                 }
             }
+        })
+        if(!descriptor && typeof inst.template==='function'){
+            descriptor = inst.template(modelSchemaProxy,inst)
+            ctor = fn
         }
+        this.vnode = descriptor
+        this.ctor = ctor
+        //this['--meta'] = meta
+        return this
     }
-    //if(!descriptor) throw new Exception('不正确的render函数',{render:template})
+    tag(name:string):Meta{
+        if(this.tagName) throw new Exception('重复指定控件的标签',{name:name});
+        if(metas[name]) throw new Exception('已经注册了该标签的控件',{existed:metas[name]})
+        this.tagName = name
+        metas[name] = this as any;
+        return this
+    }
+    props(names:string[]):Meta{
+        if(!this.propnames){
+            this.propnames = []
+            for(const n in names) {
+                const name = trim(names[n])
+                if(name)this.propnames.push(names[n])
+            }
+        } else {
+            console.warn('已经指定过props，会合并名称',this.propnames,names)
+            for(const n in names) {
+                const name = trim(names[n])
+                if(!array_contains(this.propnames,name))this.propnames.push(names[n])
+            }
+        }
+        return this
+    }
+    createComponent(){
+
+    }
     
-    if(!meta) meta = {} as any
-    return meta.resolved=true,meta.descriptor = descriptor,meta.ctor = ctor,meta.renderer =renderer,meta.schema=schema,meta['--meta'] = meta
 }
 
 /////////////////////////////////////////////////
 // runtime
 
-class RuntimeInfo{
+class ComponentRuntimeInfo{
     meta:TMeta
-    component:TComponent
+    instance:TComponent
     node:TNode
     model:TObservable
     scope: Scope
-    parent:RuntimeInfo
-    children:RuntimeInfo[]
+    parent:ComponentRuntimeInfo
+    children:ComponentRuntimeInfo[]
     mounted:boolean
     disposed:boolean
-    constructor(meta:TMeta,opts:any,parent?:RuntimeInfo){
+    constructor(meta:TMeta,opts:any,parent?:ComponentRuntimeInfo){
         this.meta = meta
-        const component:TComponent = this.component = create(meta.ctor,true)
+        const component:TComponent = this.instance = activate(meta.ctor,true)
         constant(false,component,'--',this)
         
         if(meta.props && opts)for(let i in meta.props) {let n = meta.props[i];component[n]=opts[n];}
-        const model = this.model = new Observable(component,meta.schema,undefined,'this').$observable
+        const model = this.model = new Observable(component,meta.modelSchema,undefined,'this').$observable
         this.scope = new Scope(model,meta.tag)
         if(typeof component.created==='function') component.created()
         if(parent) parent.appendChild(this)
         
     }
     render(){
-        return render({scope:this.scope,component:this.component,descriptor:this.meta.descriptor})
+        return render({scope:this.scope,component:this.instance,descriptor:this.meta.vnode})
     }
-    appendChild(child:RuntimeInfo){
+    appendChild(child:ComponentRuntimeInfo){
         if(child.parent) throw new Exception('该component已经有父级,不可以再指定父级',child)
         child.parent = this
         const node = child.render()
         platform.appendChild(this.node,node)
-        const parentRTInfo = parent['--'] as RuntimeInfo
+        const parentRTInfo = parent['--'] as ComponentRuntimeInfo
         const children = parentRTInfo.children || (parentRTInfo.children=[])
         children.push(this)
         if(this.mounted){
-            if(typeof child.component.mounted){
-                child.component.mounted()
+            if(typeof child.instance.mounted){
+                child.instance.mounted()
             }
         }
         return this
@@ -839,20 +1061,20 @@ class RuntimeInfo{
         if(this.parent) throw new Exception('不可以只能挂载根组件，该组件已经有父组件',this)
         const node = this.render()
         platform.mount(container,node)
-        function mount(info:RuntimeInfo){
+        function mount(info:ComponentRuntimeInfo){
             info.mounted=true
-            if(typeof info.component.mounted==='function'){
-                info.component.mounted()
+            if(typeof info.instance.mounted==='function'){
+                info.instance.mounted()
             }
             if(info.children) for(let i in info.children) mount(info.children[i])
         }
         mount(this)
-        return this.component
+        return this.instance
     }
     dispose(){
-        if(typeof this.component.dispose==='function'){
+        if(typeof this.instance.dispose==='function'){
             try{
-                this.component.dispose()
+                this.instance.dispose()
             }catch(ex){
                 console.error("dispose错误",ex)
             }
@@ -863,7 +1085,7 @@ class RuntimeInfo{
 }
 
 class Runtime{
-    roots:RuntimeInfo[]
+    roots:ComponentRuntimeInfo[]
     timer:number
     tick :number = 50
     constructor(){
@@ -873,11 +1095,12 @@ class Runtime{
         if(!renderer) return
         let meta:TMeta = renderer['--meta']
         if(!meta) meta = resolveMeta(renderer)
-        const rtInfo = new RuntimeInfo(meta,opts)
-        
+        const rtInfo = new ComponentRuntimeInfo(meta,opts)
+        this._addRoot(rtInfo)
         return rtInfo
     }
-    private _addRoot(root:RuntimeInfo){
+    private _addRoot(root:ComponentRuntimeInfo){
+        if(root.parent) throw new Exception('不是顶级控件，不可以挂载',root)
         this.roots.push(root)
         if(!this.timer){
             this.timer = setTimeout(()=>{},this.tick)
@@ -906,9 +1129,9 @@ export let runtime:Runtime = new Runtime()
 export function mount(container:TNode,opts:any,extra?:any){
     let t = typeof opts
     if(t==='function'){
-        debugger
         const meta = resolveMeta(opts)
-        const rt = new RuntimeInfo(meta,opts)
+        const rt = new ComponentRuntimeInfo(meta,opts)
+        debugger
         return rt.mount(container)
     }
     throw "not implement"
@@ -919,7 +1142,7 @@ export function mount(container:TNode,opts:any,extra?:any){
 
 
 type TRenderContext = {
-    descriptor:NodeDescriptor,scope:any,component:TComponent
+    descriptor:TNodeDescriptor,scope:any,component:TComponent
 }
 
 export function render(context:TRenderContext) {
@@ -953,6 +1176,7 @@ function renderText(content:any,context:TRenderContext):TNode{
 }
 
 function renderNode(tag:string,context:TRenderContext):TNode{
+    debugger
     const {descriptor} = context
     const node = platform.createElement(tag)
     const attrs = descriptor.attrs
@@ -964,7 +1188,7 @@ function renderNode(tag:string,context:TRenderContext):TNode{
         } 
         else {
             platform.setAttribute(node,attrName,value);
-            ((attrName,node,platform,component)=>{
+            if(observable)((attrName,node,platform,component)=>{
                 observable?.subscribe((evt)=>{
                     platform.setAttribute(node,attrName,evt.value)
                 },component)
@@ -1006,7 +1230,7 @@ function getListener(fn:Function,component:TComponent){
     let listener = fn['--listener']
     if(listener) return listener
     if(!component) return fn
-    listener = function(){return fn.apply(component,arguments)}
+    listener = function(evt){return fn.call(component,evt,component)}
     constant(false,fn ,'--listener',listener)
     return listener
 }
