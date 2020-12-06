@@ -537,8 +537,8 @@ var __decorate = (this && this.__decorate) || function (decorators, target, key,
             this.ctor = ctor;
         }
         Activator.prototype.prop = function (propname, depname) {
-            if (!this.dependenceProps)
-                this.dependenceProps = {};
+            if (!this.depProps)
+                this.depProps = {};
             if (depname === undefined) {
                 if (typeof propname === 'object') {
                     if (is_array(propname))
@@ -555,33 +555,42 @@ var __decorate = (this && this.__decorate) || function (decorators, target, key,
             depname = depname.replace(trimRegx, '');
             if (!propname || depname)
                 throw new Exception('依赖必须指定属性名/依赖名');
-            this.dependenceProps[propname] = depname;
+            this.depProps[propname] = depname;
             return this;
         };
         Activator.prototype.createInstance = function (args, constructing, constructed) {
             var thisInstance = Object.create(this.ctor.prototype);
-            if (constructing)
-                constructing(thisInstance);
-            var retInstance;
+            var retInstance = thisInstance;
+            var ctorArgs = [];
             if (args instanceof InjectScope) {
                 retInstance = createFromInjection(args, thisInstance, this);
             }
             else {
-                retInstance = this.ctor.apply(retInstance, args || []);
+                ctorArgs = buildCtorArgs(args, thisInstance, this.depProps, this.ctorArgs);
             }
-            if (retInstance === undefined)
-                retInstance = thisInstance;
+            if (constructing)
+                retInstance = constructing(thisInstance, ctorArgs, this, args);
+            if (retInstance !== undefined)
+                thisInstance = retInstance;
+            retInstance = this.ctor.apply(thisInstance, ctorArgs);
+            if (retInstance !== undefined)
+                thisInstance = retInstance;
             if (constructed) {
-                var justified = constructed(thisInstance, this.ctor);
-                if (justified !== undefined)
-                    retInstance = justified;
+                retInstance = constructed(thisInstance, this);
+                if (retInstance !== undefined)
+                    thisInstance = retInstance;
             }
-            return retInstance;
+            if (!(thisInstance instanceof this.ctor))
+                Object.setPrototypeOf(thisInstance, this.ctor.prototype);
+            return thisInstance;
         };
-        Activator.fetch = function (ctorOrProto, parseArgs) {
+        Activator.activate = function (ctorPrProto, args, constructing, constructed) {
+            return Activator.fetch(ctorPrProto).createInstance(args, constructing, constructed);
+        };
+        Activator.fetch = function (ctorOrProto) {
             if (!ctorOrProto)
                 return undefined;
-            var activator = ctorOrProto['--activator'];
+            var activator = ctorOrProto['--activator--'];
             if (!activator) {
                 var t = typeof ctorOrProto;
                 if (t === 'function') {
@@ -590,11 +599,11 @@ var __decorate = (this && this.__decorate) || function (decorators, target, key,
                 else if (t === 'object') {
                     var ctor = function () { };
                     activator = new Activator(ctor);
-                    activator.dependenceArgs = [];
+                    activator.ctorArgs = [];
                 }
-                Object.defineProperty(ctorOrProto, '--activator', { enumerable: false, configurable: false, writable: false, value: activator });
+                Object.defineProperty(ctorOrProto, '--activator--', { enumerable: false, configurable: false, writable: false, value: activator });
             }
-            if (parseArgs && !activator.dependenceArgs)
+            if (!activator.ctorArgs)
                 parseDepdenceArgs(activator);
             return activator;
         };
@@ -605,15 +614,36 @@ var __decorate = (this && this.__decorate) || function (decorators, target, key,
         var code = activator.ctor.toString();
         var start = code.indexOf('(');
         var end = code.indexOf(')', start);
-        var argsText = code.substring(start + 1, end - 1);
+        var argsText = code.substring(start + 1, end);
         var argslist = argsText.split(',');
         var args = [];
         for (var i in argslist)
             args.push(argslist[i].replace(trimRegx, ''));
-        activator.dependenceArgs = args;
+        activator.ctorArgs = args;
+    }
+    function buildCtorArgs(args, thisInstance, depProps, depArgs) {
+        if (!args)
+            return [];
+        if (is_array(args))
+            return args;
+        if (typeof args === 'object') {
+            var actualArgs = [];
+            for (var propname in depProps) {
+                var mapname = depProps[propname];
+                var value = args[mapname || propname];
+                if (value !== undefined)
+                    thisInstance[propname] = value;
+            }
+            for (var i in depArgs) {
+                actualArgs.push(args[depArgs[i]]);
+            }
+            return actualArgs;
+        }
+        else
+            return [args];
     }
     function createFromInjection(scope, selfInstance, activator) {
-        if (!activator.dependenceArgs)
+        if (!activator.ctorArgs)
             parseDepdenceArgs(activator);
         if (this.props && this.props.length) {
             for (var propname in this.props) {
@@ -638,7 +668,7 @@ var __decorate = (this && this.__decorate) || function (decorators, target, key,
     function injectable(ctorOrProto) {
         var t = typeof ctorOrProto;
         if (t === 'function' || t === 'object') {
-            return Activator.fetch(ctorOrProto, true);
+            return Activator.fetch(ctorOrProto);
         }
         return function (target, name) {
             var activator = Activator.fetch(ctorOrProto);
@@ -1170,10 +1200,10 @@ var __decorate = (this && this.__decorate) || function (decorators, target, key,
                 };
                 ctor.prototype = fn.prototype;
                 this.activator = Activator.fetch(ctor);
-                this.activator.dependenceArgs = [];
+                this.activator.ctorArgs = [];
             }
             else
-                this.activator = Activator.fetch(fn, true);
+                this.activator = Activator.fetch(fn);
             this.vnode = vnode;
             return this;
         }

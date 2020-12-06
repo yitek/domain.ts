@@ -394,6 +394,7 @@ const dispose = function(handler?){
         }
         Object.defineProperty(this,'--disposes',{enumerable:false,configurable:false,writable:false,value:null})
         Object.defineProperty(this,'$disposed',{enumerable:false,configurable:false,writable:false,value:true})
+        
         return this
     }
     let disposeHandlers = this['--disposes']
@@ -476,13 +477,13 @@ export class InjectScope extends Disposiable{
 }
 
 export class Activator{
-    dependenceArgs:string[]
-    dependenceProps:{[propname:string]:string}
+    ctorArgs:string[]
+    depProps:{[propname:string]:string}
     constructor(public ctor:{new(...args):any}){
 
     }
     prop(propname:string|{[pname:string]:string}|string[],depname?:string):Activator{
-        if(!this.dependenceProps) this.dependenceProps={}
+        if(!this.depProps) this.depProps={}
         if(depname===undefined){
             if(typeof propname==='object') {
                 if(is_array(propname)) for(const i in propname as string[]) this.prop(depname[i],depname[i])
@@ -492,28 +493,37 @@ export class Activator{
         propname = (propname as string).replace(trimRegx,'')
         depname = depname.replace(trimRegx,'')
         if(!propname || depname) throw new Exception('依赖必须指定属性名/依赖名')
-        this.dependenceProps[propname] = depname
+        this.depProps[propname] = depname
         return this
     }
-    createInstance(args:InjectScope|any[],constructing?:any,constructed?:any){
+    createInstance(args?:any,constructing?:(selfInstance:any,args:any[],activator:Activator,rawArgs:any)=>any,constructed?:(selfInstance:any,activator:Activator)=>any){
         let thisInstance:any = Object.create(this.ctor.prototype)
-        if(constructing)  constructing(thisInstance)
-        let retInstance
+        
+        let retInstance = thisInstance
+        let ctorArgs =[]
         if(args instanceof InjectScope){
             retInstance = createFromInjection(args as InjectScope,thisInstance,this)
         }else {
-            retInstance = this.ctor.apply(retInstance, args || [])
+            ctorArgs = buildCtorArgs(args,thisInstance,this.depProps,this.ctorArgs)
         }
-        if(retInstance===undefined) retInstance = thisInstance
+        if(constructing) retInstance = constructing(thisInstance,ctorArgs,this,args)
+        if(retInstance!==undefined) thisInstance = retInstance
+        retInstance = this.ctor.apply(thisInstance,ctorArgs)
+        if(retInstance!==undefined) thisInstance = retInstance
         if(constructed)  {
-            const justified = constructed(thisInstance,this.ctor)
-            if(justified!==undefined) retInstance = justified
+            retInstance = constructed(thisInstance,this)
+            if(retInstance!==undefined) thisInstance = retInstance
         } 
-        return retInstance
+        
+        if(!(thisInstance instanceof this.ctor))(Object as any).setPrototypeOf(thisInstance, this.ctor.prototype);
+        return thisInstance
     }
-    static fetch(ctorOrProto:any, parseArgs?:boolean):Activator{
+    static activate(ctorPrProto:any,args?:any,constructing?:(selfInstance:any,args:any[],activator:Activator,rawArgs:any)=>any,constructed?:(selfInstance:any,activator:Activator)=>any){
+        return Activator.fetch(ctorPrProto).createInstance(args,constructing,constructed)
+    }
+    static fetch(ctorOrProto:any):Activator{
         if(!ctorOrProto) return undefined
-        let activator:Activator = ctorOrProto['--activator']
+        let activator:Activator = ctorOrProto['--activator--']
         if(!activator){
             const t = typeof ctorOrProto
             if(t==='function'){
@@ -521,11 +531,11 @@ export class Activator{
             }else if(t==='object'){
                 const ctor = function(){}
                 activator = new Activator(ctor as any as {new(...arg):any})
-                activator.dependenceArgs = []
+                activator.ctorArgs = []
             }
-            Object.defineProperty(ctorOrProto,'--activator',{enumerable:false,configurable:false,writable:false,value:activator})
+            Object.defineProperty(ctorOrProto,'--activator--',{enumerable:false,configurable:false,writable:false,value:activator})
         }
-        if(parseArgs && !activator.dependenceArgs) parseDepdenceArgs(activator)
+        if(!activator.ctorArgs) parseDepdenceArgs(activator)
         return activator
     }
 }
@@ -533,14 +543,31 @@ function parseDepdenceArgs(activator:Activator){
     const code = activator.ctor.toString()
     const start = code.indexOf('(')
     const end = code.indexOf(')',start)
-    const argsText = code.substring(start+1,end-1)
+    const argsText = code.substring(start+1,end)
     const argslist = argsText.split(',')
     const args = []
     for(const  i in argslist) args.push(argslist[i].replace(trimRegx,''))
-    activator.dependenceArgs = args
+    activator.ctorArgs = args
+}
+
+function buildCtorArgs(args:any,thisInstance:any,depProps:{[name:string]:string},depArgs:string[]):any[]{
+    if(!args) return []
+    if(is_array(args)) return args 
+    if(typeof args === 'object'){
+        const actualArgs = []
+        for(const propname in depProps){
+            const mapname = depProps[propname]
+            const value = args[mapname|| propname]
+            if(value!==undefined) thisInstance[propname] = value
+        }
+        for(const i in depArgs) {
+            actualArgs.push(args[depArgs[i]])
+        }
+        return actualArgs
+    }else return [args]
 }
 function createFromInjection(scope:InjectScope,selfInstance:any,activator:Activator){
-    if(!activator.dependenceArgs) parseDepdenceArgs(activator)
+    if(!activator.ctorArgs) parseDepdenceArgs(activator)
 
     if(this.props && this.props.length){
         for(const propname in this.props){
@@ -565,7 +592,7 @@ function createFromInjection(scope:InjectScope,selfInstance:any,activator:Activa
 export function injectable(ctorOrProto?:any){
     const t = typeof ctorOrProto
     if(t==='function' || t==='object') {
-        return Activator.fetch(ctorOrProto,true)
+        return Activator.fetch(ctorOrProto)
     }
     return function(target,name?){
         const activator = Activator.fetch(ctorOrProto)
@@ -1130,8 +1157,8 @@ export class Meta{
             } as any
             ctor.prototype = fn.prototype
             this.activator = Activator.fetch(ctor)
-            this.activator.dependenceArgs=[]
-        }else this.activator =Activator.fetch(fn,true)
+            this.activator.ctorArgs=[]
+        }else this.activator =Activator.fetch(fn)
         
         this.vnode = vnode
         return this

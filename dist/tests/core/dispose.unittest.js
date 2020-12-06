@@ -27,6 +27,10 @@
                 "可以通过$dispose(callback)附加释放后回调函数，该函数会在$dispose()调用时被依次调用": function () { return disposeInvoked1 && disposeInvoked2; },
                 '回调函数的this指向disposable本身': function () { return disposeInvoked1 === disposer; }
             });
+            disposer.$dispose(function () { return disposeInvoked1 = true; });
+            ASSERT({
+                '已经释放的对象可以再追加释放回调，该回调函数会立即执行': function () { return disposeInvoked1 === true; }
+            });
         }
     });
 });

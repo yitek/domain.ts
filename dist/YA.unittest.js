@@ -48,7 +48,7 @@ var __extends = (this && this.__extends) || (function () {
             for (var _i = 0; _i < arguments.length; _i++) {
                 args[_i] = arguments[_i];
             }
-            console.log.apply(console, arguments);
+            console.warn.apply(console, args);
             return this;
         };
         Logger.prototype.error = function () {

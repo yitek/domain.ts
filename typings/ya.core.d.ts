@@ -120,8 +120,8 @@ export declare class Activator {
     ctor: {
         new (...args: any[]): any;
     };
-    dependenceArgs: string[];
-    dependenceProps: {
+    ctorArgs: string[];
+    depProps: {
         [propname: string]: string;
     };
     constructor(ctor: {
@@ -130,8 +130,9 @@ export declare class Activator {
     prop(propname: string | {
         [pname: string]: string;
     } | string[], depname?: string): Activator;
-    createInstance(args: InjectScope | any[], constructing?: any, constructed?: any): any;
-    static fetch(ctorOrProto: any, parseArgs?: boolean): Activator;
+    createInstance(args?: any, constructing?: (selfInstance: any, args: any[], activator: Activator, rawArgs: any) => any, constructed?: (selfInstance: any, activator: Activator) => any): any;
+    static activate(ctorPrProto: any, args?: any, constructing?: (selfInstance: any, args: any[], activator: Activator, rawArgs: any) => any, constructed?: (selfInstance: any, activator: Activator) => any): any;
+    static fetch(ctorOrProto: any): Activator;
 }
 export declare function injectable(ctorOrProto?: any): Activator | ((target: any, name?: any) => any);
 declare enum ModelSchemaTypes {

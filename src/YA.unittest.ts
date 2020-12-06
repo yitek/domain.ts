@@ -9,7 +9,7 @@ export class Logger{
         return this
     }
     code(...args){console.log.apply(console,arguments);return this}
-    success(...args){console.log.apply(console,arguments);return this}
+    success(...args){console.warn.apply(console,args);return this}
     error(...args){console.error.apply(console,arguments);return this}
     static default:Logger
 }
@@ -63,6 +63,7 @@ class AssertStatements implements TExecutable{
             const assertRs = assertStatement.execute(logger,self)
             rs.push({result:assertRs,statement:assertStatement})
         }
+        
         return rs
     }
     static fetch(asserts:any):AssertStatements{
