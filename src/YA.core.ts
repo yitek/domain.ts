@@ -406,8 +406,9 @@ const dispose = function(handler?){
     return this
 
 }
-export function disposable(target){
+export function disposable(target:any):any{
     Object.defineProperty(target,'$dispose',{enumerable:false,configurable:false,writable:true,value:dispose})
+    return target
 }
 export class Disposiable{
     $disposed?:boolean
@@ -589,24 +590,24 @@ enum ModelSchemaTypes{
 }
 
 @implicit()
-export class ModelSchema {
+export class Schema {
     $type: ModelSchemaTypes
     $name?: string
-    $superSchema?: ModelSchema
+    $superSchema?: Schema
     $defaultValue?: any
-    $dependenceSchemas:ModelSchema[]
-    $itemSchema?: ModelSchema
-    length?: ModelSchema
-    private '--root'?:ModelSchema
+    $dependenceSchemas:Schema[]
+    $itemSchema?: Schema
+    length?: Schema
+    private '--root'?:Schema
     private '--paths'?:string[]
-    constructor(defaultValue?:any,name?: string |ModelSchema[],superSchema?: any){
+    constructor(defaultValue?:any,name?: string |Schema[],superSchema?: any){
         let type :ModelSchemaTypes
-        let deps :ModelSchema[]
+        let deps :Schema[]
         if(superSchema==='constant'){
             type = ModelSchemaTypes.constant
         }else if(superSchema==='computed'){
             type = ModelSchemaTypes.computed
-            deps = name as ModelSchema[]
+            deps = name as Schema[]
             superSchema = undefined
         }
         implicit(this,{
@@ -627,17 +628,17 @@ export class ModelSchema {
         }
     }
     
-    $prop(name:string, defaultValue?:any): ModelSchema{
+    $prop(name:string, defaultValue?:any): Schema{
         if(this.$type === ModelSchemaTypes.array) throw new Exception('已经定义为array了',{'schema':this});
         this.$type = ModelSchemaTypes.object;
-        return this[name] || (this[name] = new ModelSchema(defaultValue,name,this));
+        return this[name] || (this[name] = new Schema(defaultValue,name,this));
     }
-    $asArray(defaultItemValue?: any):ModelSchema{
+    $asArray(defaultItemValue?: any):Schema{
         if(this.$type !== ModelSchemaTypes.value) throw new Exception('已经定义为array/object了',{'schema':this});
         this.$type = ModelSchemaTypes.array;
-        let lengthSchema = new ModelSchema(0,'length',this);
+        let lengthSchema = new Schema(0,'length',this);
         Object.defineProperty(this,'length',{enumerable:false,configurable:false,writable:false,value:lengthSchema});
-        let itemSchema = new ModelSchema(defaultItemValue,null,this);
+        let itemSchema = new Schema(defaultItemValue,null,this);
         return this.$itemSchema = itemSchema;
     }
     $dataPath(){
@@ -651,23 +652,23 @@ export class ModelSchema {
         return paths
     }
     $root(){
-        let root:ModelSchema = this['--root']
+        let root:Schema = this['--root']
         if(!root) root = buildSchemaInfo.call(this).root
         return root
     }
 
-    static createBuilder(target:ModelSchema){
-        if(!target || target instanceof ModelSchema) return new Proxy(new ModelSchema(),memberStatesTraps)
+    static createBuilder(target:Schema){
+        if(!target || target instanceof Schema) return new Proxy(new Schema(),memberStatesTraps)
         return new Proxy(target,rootStatesTraps);
     }
 
-    static constant:ModelSchema = new ModelSchema(None,'<CONSTANT>','constant')
+    static constant:Schema = new Schema(None,'<CONSTANT>','constant')
 
 }
 function buildSchemaInfo(){
-    let schema:ModelSchema = this
+    let schema:Schema = this
     let paths:string[] =[]
-    let root :ModelSchema
+    let root :Schema
     while(schema){
         root = schema
         paths.unshift(schema.$name)
@@ -682,7 +683,7 @@ function buildSchemaInfo(){
 }
 
 const rootStatesTraps = {
-    get(target: {inst:any,schema:ModelSchema},propname:string){
+    get(target: {inst:any,schema:Schema},propname:string){
         if(!target.inst) return target.inst[propname]
         if(propname[0]==='$') {
             if(propname==='$schema') return target.schema;
@@ -690,7 +691,7 @@ const rootStatesTraps = {
         }
         return new Proxy(target.schema.$prop(propname),memberStatesTraps);
     },
-    set(target:{inst:any,schema:ModelSchema},propname:string,value:any){
+    set(target:{inst:any,schema:Schema},propname:string,value:any){
         if(!target.inst) {
             target.inst[propname] = value
             return
@@ -699,14 +700,14 @@ const rootStatesTraps = {
     }
 };
 const memberStatesTraps = {
-    get(schema: ModelSchema,propname:string){
+    get(schema: Schema,propname:string){
         if(propname[0]==='$') {
             if(propname==='$schema') return schema;
             return schema[propname];
         }
         return new Proxy(schema.$prop(propname),memberStatesTraps);
     },
-    set(target:ModelSchema,propname:string,value:any){
+    set(target:Schema,propname:string,value:any){
         throw new Exception('schemaBuilder不可以在schemaBuilder上做赋值操作');
     }
 };
@@ -781,7 +782,7 @@ subscribable(Subscription.prototype)
 
 export type TNodeDescriptor = {
     tag?: string;
-    content?: string| ModelSchema | TObservable;
+    content?: string| Schema | TObservable;
     component?: any;
     attrs?: {[name:string]:any};
     children?: TNodeDescriptor[];
@@ -829,7 +830,7 @@ export class Observable{
     name:string
     old:any
     value:any
-    schema: ModelSchema
+    schema: Schema
     super?:Observable
     deps?:Observable[]
     dep_handler?:(evt:TObservableEvent)=>any
@@ -838,13 +839,13 @@ export class Observable{
     captures?:{(evt:TObservableEvent):any}[]
     hasChanges?:boolean
     length?:Observable
-    constructor(initial:any,schema?:ModelSchema,name?:string,superOb?:Observable|string){
+    constructor(initial:any,schema?:Schema,name?:string,superOb?:Observable|string){
         let facade;
         facade = (value?:any,isSubscriber?:any,capture?:boolean):any=>{
             if(value===undefined) {
                 return this.value===Observable?this.old:this.value
             }else if(value===Observable) return this
-            else if(value===ModelSchema) return this.schema
+            else if(value===Schema) return this.schema
             if(isSubscriber!==undefined){
                 if(this.type!==ModelSchemaTypes.constant){
                     if(isSubscriber){
@@ -858,7 +859,7 @@ export class Observable{
                 return facade
             }
             if(value){
-                if(value instanceof ModelSchema) throw new Exception('不能够将Schema赋值给observable')
+                if(value instanceof Schema) throw new Exception('不能够将Schema赋值给observable')
                 if(this.schema.$type=== ModelSchemaTypes.constant || this.schema.$type===ModelSchemaTypes.computed) return facade
                 if(value['$Observable']) value = value()
                 else if(value.$observable) value = value.get()
@@ -879,7 +880,7 @@ export class Observable{
             this.type = ModelSchemaTypes.computed
             return
         }
-        schema = this.schema = (schema as ModelSchema) || new ModelSchema(initial,name)
+        schema = this.schema = (schema as Schema) || new Schema(initial,name)
         this.type = schema.$type
         if(this.type===ModelSchemaTypes.object){
             initObservableObject.call(this, facade, initial, schema)            
@@ -977,7 +978,7 @@ function bubble(evt:TObservableEvent){
     }
 }
 
-function initObservableObject(facade:TObservable,initial:any,schema:ModelSchema){
+function initObservableObject(facade:TObservable,initial:any,schema:Schema){
     this.set = (value:any): Observable=>{
         if(!value) value={}
         let facade = this.facade;
@@ -1005,7 +1006,7 @@ function initObservableObject(facade:TObservable,initial:any,schema:ModelSchema)
     }
 
 }
-function initObservableArray(facade:TObservable,initial:any,schema:ModelSchema){
+function initObservableArray(facade:TObservable,initial:any,schema:Schema){
     this.set = (value)=>{
         if(!value) value=[]
         let facade = this.$observable
@@ -1054,7 +1055,7 @@ function initObservableArray(facade:TObservable,initial:any,schema:ModelSchema){
         Object.defineProperty(facade,name, {enumerable:false,configurable:true,writable:false,value:itemObservable.$observable})
     }
 }
-function initObservableComputed(facade:TObservable,initial:any,schema:ModelSchema){
+function initObservableComputed(facade:TObservable,initial:any,schema:Schema){
     this.get = ()=>{
         if(this.value!==Observable) return this.value
         const args = []
@@ -1100,26 +1101,26 @@ function initObservableComputed(facade:TObservable,initial:any,schema:ModelSchem
 // 所有控件都有
 export type TComponent = any
 
-export class ComponentMeta{
+export class Meta{
     tagName?:string
     resolved?:boolean
     activator:Activator
-    scopeSchema?:ModelSchema
-    modelSchema?:ModelSchema
+    scopeSchema?:Schema
+    modelSchema?:Schema
     properties?:{[name:string]:DPath & {handlername?:string}}
     vnode?:TNodeDescriptor
     
     constructor(fn:Function){
-        const scopeSchema = this.scopeSchema = new ModelSchema()
-        const modelSchema = this.modelSchema = new ModelSchema(undefined,ComponentMeta.modelname)
-        const modelSchemaProxy = ModelSchema.createBuilder(modelSchema)
-        const scopeSchemaProxy = ModelSchema.createBuilder(scopeSchema)
+        const scopeSchema = this.scopeSchema = new Schema()
+        const modelSchema = this.modelSchema = new Schema(undefined,Meta.modelname)
+        const modelSchemaProxy = Schema.createBuilder(modelSchema)
+        const scopeSchemaProxy = Schema.createBuilder(scopeSchema)
         const self = fn.prototype
         let renderer :(model:any,injectScope:InjectScope)=>TNodeDescriptor = (fn as any).render || fn.prototype.render
         let vnode :TNodeDescriptor
         if(renderer){
             if(typeof renderer!=='function')
-                vnode = ComponentMeta.parseTemplateText(renderer as any,self,modelSchemaProxy,scopeSchemaProxy) 
+                vnode = Meta.parseTemplateText(renderer as any,self,modelSchemaProxy,scopeSchemaProxy) 
             else 
                 vnode = renderer.call(self,modelSchemaProxy,scopeSchemaProxy)
         }
@@ -1135,14 +1136,14 @@ export class ComponentMeta{
         this.vnode = vnode
         return this
     }
-    tag(name:string):ComponentMeta{
+    tag(name:string):Meta{
         if(this.tagName) throw new Exception('重复指定控件的标签',{name:name});
-        if(ComponentMeta.components[name]) throw new Exception('已经注册了该标签的控件',{existed:ComponentMeta.components[name]})
+        if(Meta.components[name]) throw new Exception('已经注册了该标签的控件',{existed:Meta.components[name]})
         this.tagName = name
-        ComponentMeta.components[name] = this as any;
+        Meta.components[name] = this as any;
         return this
     }
-    props(names:{[n:string]:string}):ComponentMeta{
+    props(names:{[n:string]:string}):Meta{
         
         if(!this.properties){
             this.properties = {}
@@ -1159,7 +1160,7 @@ export class ComponentMeta{
     }
     
     static parseTemplateText : (text:string,self:any,model:any,scope:any)=>TNodeDescriptor
-    static components :{[name:string]:ComponentMeta} = {}
+    static components :{[name:string]:Meta} = {}
     static modelname:string = '--model--'
 }
 
@@ -1170,12 +1171,12 @@ export function component(tag?:any,fn?:any):any{
         }
     }
     if(fn){
-        const meta = new ComponentMeta(fn)
+        const meta = new Meta(fn)
         if(tag) meta.tag(tag)
     }
     
     return function(target){
-        const meta = new ComponentMeta(target)
+        const meta = new Meta(target)
         if(tag) meta.tag(tag)
     }
 }
@@ -1187,21 +1188,21 @@ export type TBindScope = {
     $superScope:TBindScope
     $fetch(name:string):TObservable
     $resolve(bindValue:any,expandOb?:boolean):any
-    $createScope(name?:string,schema?:ModelSchema) 
+    $createScope(name?:string,schema?:Schema) 
 } & TObservable
 export class BindScope extends Observable{
-    constructor(schema:ModelSchema,name:string,superScope:BindScope,model:TObservable){
+    constructor(schema:Schema,name:string,superScope:BindScope,model:TObservable){
         super({},schema,undefined,name)
         Object.defineProperty(this.$observable,'$superScope',{enumerable:false,configurable:false,writable:false,value:superScope.$observable})
-        Object.defineProperty(this.$observable,ComponentMeta.modelname,{enumerable:false,configurable:false,writable:false,value:model})
+        Object.defineProperty(this.$observable,Meta.modelname,{enumerable:false,configurable:false,writable:false,value:model})
         Object.defineProperty(this.$observable,'$createScope',{enumerable:false,configurable:false,writable:false,value:function(name:string){
-            return new BindScope(null,name,this,this[ComponentMeta.modelname]).$observable
+            return new BindScope(null,name,this,this[Meta.modelname]).$observable
         }})
         Object.defineProperty(this.$observable,'$resolve',{enumerable:false,configurable:false,writable:false,value:bindScopeResolve})
     }
     //name?:string|{[name:string]:T},inital?:{[name:string]:T}
     $createScope(name?:string,schema?:any):BindScope{
-        return new BindScope(schema,name,this,this[ComponentMeta.modelname]) as any
+        return new BindScope(schema,name,this,this[Meta.modelname]) as any
     }
     
 }
@@ -1215,7 +1216,7 @@ function bindScopeResolve(bindValue:any,expandOb?:boolean):TObservable{
         }
         return undefined
     }
-    if(bindValue instanceof ModelSchema ){
+    if(bindValue instanceof Schema ){
         if(bindValue.$type===ModelSchemaTypes.constant){
             return new Observable(undefined,bindValue,undefined,'<CONSTANT>').$observable
         }else if (bindValue.$type === ModelSchemaTypes.computed) {
@@ -1257,7 +1258,7 @@ export class ComponentRuntime{
     scope:BindScope
     slots:{[name:string]:TNodeDescriptor[]}
     sid:string
-    constructor(public opts:TNodeDescriptor,public meta:ComponentMeta,public parent?:ComponentRuntime){
+    constructor(public opts:TNodeDescriptor,public meta:Meta,public parent?:ComponentRuntime){
         const tag = this.meta.tagName || (this.meta.tagName=rid('Component#'))
         this.sid = rid(`<${tag}>#`)
         if(parent){
@@ -1285,9 +1286,9 @@ export class ComponentRuntime{
     }
     initialize(bindContext:TBindContext){
         this.scope = bindContext.scope.$createScope(this.sid,this.meta.scopeSchema)
-        this.model = new Observable(undefined,this.meta.modelSchema,ComponentMeta.modelname,undefined)
+        this.model = new Observable(undefined,this.meta.modelSchema,Meta.modelname,undefined)
         this.model.value = this.model.old
-        Object.defineProperty(this.scope,ComponentMeta.modelname,{enumerable:false,writable:false,configurable:false,value:this.model})
+        Object.defineProperty(this.scope,Meta.modelname,{enumerable:false,writable:false,configurable:false,value:this.model})
         if(typeof this.instance.created==='function') this.instance.created(this.model.value,this.services)
     }
     render(bindContext:TBindContext):any[]{

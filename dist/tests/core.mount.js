@@ -18,6 +18,6 @@
             YA.createElement("input", { type: 'text', value: states.inputText, onkeydown: inputChanged }),
             YA.createElement("span", null, states.inputText));
     }
-    YA.mount(document.body, view);
 });
+//YA.mount(document.body,view)
 //# sourceMappingURL=core.mount.js.map

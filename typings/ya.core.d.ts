@@ -13,6 +13,15 @@ export declare function is_empty(obj: any): boolean;
  * @returns {string}
  */
 export declare function trim(text: any): string;
+/**
+ * 骆驼命名法
+ * 将连字号变为骆驼命名法
+ *
+ * @export
+ * @param {*} text
+ * @param {boolean} [mix] true是大写开头，大小写混写的格式
+ * @returns {string}
+ */
 export declare function camel(text: any, mix?: boolean): string;
 /**
  * 判定字符串是否以某个串开始
@@ -22,7 +31,7 @@ export declare function camel(text: any, mix?: boolean): string;
  * @param {*} token 开始标记字符串
  * @returns {boolean}
  */
-export declare function startWith(text: any, token: any): boolean;
+export declare function startsWith(text: any, token: any): boolean;
 /**
  * 判定字符串是否以某个串结束
  *
@@ -31,7 +40,7 @@ export declare function startWith(text: any, token: any): boolean;
  * @param {*} token 结束标记字符串
  * @returns {boolean}
  */
-export declare function endWith(text: any, token: any): boolean;
+export declare function endsWith(text: any, token: any): boolean;
 /**
  * 是否是百分数
  *
@@ -44,12 +53,25 @@ export declare function array_index(obj: any, item: any, start?: number): number
 export declare function array_contains(obj: any, item: any): boolean;
 export declare function array_add_unique(arr: any[], item: any): boolean;
 export declare function array_remove(arr: any[], item: any): boolean;
-export declare function deepClone(obj: any, _clones?: any[]): any;
+export declare function clone(obj: any, _clones?: any[]): any;
 export declare let extend: (...args: any[]) => any;
+export declare class DPath {
+    dpath: string;
+    getters: {
+        (value: any, sure: any, context?: any): any;
+    }[];
+    last: string;
+    constructor(dpath: string, splitor?: string);
+    get(target: any, sure?: any, context?: any): any;
+    set(target: any, value: any, context?: any): this;
+    static fetch(path: string): DPath;
+    static getValue(target: any, dpath: string, sure?: any, context?: any): any;
+    static setValue(target: any, dpath: string, value: any, context?: any): DPath;
+    static accessors: {
+        [path: string]: DPath;
+    };
+}
 export declare let inherit: (ctor: any, base: any) => any;
-export declare function create(ctor: {
-    new (...args: any[]): any;
-}, args?: any[] | boolean): any;
 export declare function accessable(desc: any, target?: any, name?: any, value?: any): any;
 /**
  * 将成员变成隐式成员
@@ -64,73 +86,121 @@ export declare function accessable(desc: any, target?: any, name?: any, value?: 
  */
 export declare function implicit(target?: any, name?: any, value?: any): any;
 export declare function constant(enumerable?: boolean, target?: any, name?: any, value?: any): any;
+export declare function nop(): void;
 export declare class Exception extends Error {
     constructor(msg: any, detail?: any);
 }
-declare enum ObservableTypes {
-    value = 0,
-    object = 1,
-    array = 2
+export declare function rid(prefix?: string): string;
+export declare const None: any;
+export declare function disposable(target: any): any;
+export declare class Disposiable {
+    $disposed?: boolean;
+    $dispose(callback?: any): void;
+    static isInstance(obj: any): boolean;
+}
+export declare type TInjectFactory = (name: string, scope: InjectScope, target?: any) => any;
+export declare class InjectScope extends Disposiable {
+    name?: string;
+    superScope?: InjectScope;
+    factories: {
+        [name: string]: TInjectFactory;
+    };
+    constructor(name?: string, superScope?: InjectScope);
+    createScope(name?: string): InjectScope;
+    resolve(name: string, context?: any): any;
+    register(name: string, ctor: {
+        new (...args: any[]): any;
+    }, singleon?: boolean): Activator;
+    $constant(name: string, value: any): InjectScope;
+    $factory(name: string, factory: TInjectFactory): InjectScope;
+    static global: InjectScope;
+    static svcname: string;
+}
+export declare class Activator {
+    ctor: {
+        new (...args: any[]): any;
+    };
+    dependenceArgs: string[];
+    dependenceProps: {
+        [propname: string]: string;
+    };
+    constructor(ctor: {
+        new (...args: any[]): any;
+    });
+    prop(propname: string | {
+        [pname: string]: string;
+    } | string[], depname?: string): Activator;
+    createInstance(args: InjectScope | any[], constructing?: any, constructed?: any): any;
+    static fetch(ctorOrProto: any, parseArgs?: boolean): Activator;
+}
+export declare function injectable(ctorOrProto?: any): Activator | ((target: any, name?: any) => any);
+declare enum ModelSchemaTypes {
+    constant = 0,
+    value = 1,
+    object = 2,
+    array = 3,
+    computed = 4
 }
 export declare class Schema {
-    $type: ObservableTypes;
-    $owner?: Schema;
+    $type: ModelSchemaTypes;
     $name?: string;
+    $superSchema?: Schema;
     $defaultValue?: any;
-    $item?: Schema;
+    $dependenceSchemas: Schema[];
+    $itemSchema?: Schema;
+    length?: Schema;
     private '--root'?;
     private '--paths'?;
-    constructor(defaultValue?: any, name?: string, owner?: Schema);
-    length?: Schema;
+    constructor(defaultValue?: any, name?: string | Schema[], superSchema?: any);
     $prop(name: string, defaultValue?: any): Schema;
     $asArray(defaultItemValue?: any): Schema;
+    $dataPath(): DPath;
     $paths(): string[];
     $root(): Schema;
+    static createBuilder(target: Schema): any;
+    static constant: Schema;
 }
-export declare function schemaBuilder(target?: Schema): any;
-export declare class NodeDescriptor {
+export declare function eventable(target: any, name: any): void;
+export declare function subscribable(target: any): void;
+export declare class Subscription {
+    $subscribe(handler: any, disposable: Disposiable): any;
+    $unsubscribe(handler: any): any;
+    $publish(evt?: any, useApply?: boolean): void;
+    static isInstance(obj: any): boolean;
+}
+export declare type TNodeDescriptor = {
     tag?: string;
     content?: string | Schema | TObservable;
     component?: any;
     attrs?: {
         [name: string]: any;
     };
-    children?: NodeDescriptor[];
-    constructor(tag: string, attrs?: {
-        [name: string]: any;
-    });
-    appendChild(child: any): NodeDescriptor;
-    static invoke(fn: Function): void;
-}
-export declare const createElement: (tag: string, attrs: {
-    [index: string]: any;
-}, ...args: any[]) => NodeDescriptor;
-export declare function vars(count?: number | {
-    [index: string]: any;
-}): any;
+    children?: TNodeDescriptor[];
+};
 export declare type TObservableEvent = {
-    value: any;
-    old: any;
+    value?: any;
+    old?: any;
     src?: any;
     sender?: Observable;
     removed?: boolean;
     cancel?: boolean;
-    bubble?: boolean;
+    stop?: boolean;
 };
-export declare function observable(initial: any, name?: string, owner?: TObservable): any;
 export declare type TObservable = {
     [index in number | string]: TObservable;
 } & {
-    (value?: any, disposor?: any): any;
-    $Observable: Observable;
+    (value?: any, disposor?: any, capture?: boolean): any;
+    '$Observable': Observable;
 };
 export declare class Observable {
-    type: ObservableTypes;
+    type: ModelSchemaTypes;
     name: string;
     old: any;
     value: any;
     schema: Schema;
-    owner?: Observable;
+    super?: Observable;
+    deps?: Observable[];
+    dep_handler?: (evt: TObservableEvent) => any;
     $observable: TObservable;
     listeners?: {
         (evt: TObservableEvent): any;
@@ -138,77 +208,84 @@ export declare class Observable {
     captures?: {
         (evt: TObservableEvent): any;
     }[];
+    hasChanges?: boolean;
     length?: Observable;
-    constructor(inital: any, schema?: Schema, owner?: Observable, name?: string);
-    getValue(): any;
-    setValue(value: any): Observable;
+    constructor(initial: any, schema?: Schema, name?: string, superOb?: Observable | string);
+    get(): any;
+    set(value: any): Observable;
+    defineProp(name: string, initial?: any): Observable;
     subscribe(handler: (evt: TObservableEvent) => any, disposer?: any): Observable;
     unsubscribe(handler: (evt: TObservableEvent) => any): Observable;
     capture(handler: (evt: TObservableEvent) => any, disposer?: any): Observable;
     uncapture(handler: (evt: TObservableEvent) => any): Observable;
-    update(bubble?: boolean, src?: TObservableEvent): Observable;
-}
-export declare class Scope {
-    private '--parent'?;
-    private '--this'?;
-    private '--name'?;
-    constructor(parentOrThis: Scope | TObservable, name?: string);
-    $observable(schema: Schema, inital?: any, deepSearch?: boolean): TObservable;
-    $createScope(name?: string): Scope;
+    update(src?: any, removed?: boolean): Observable;
 }
 export declare type TComponent = any;
-export declare type TMeta = {
-    resolved: boolean;
-    tag?: string;
-    renderer: (state: any, sender?: any) => any;
-    ctor: {
-        new (...args: any[]): TComponent;
+export declare class Meta {
+    tagName?: string;
+    resolved?: boolean;
+    activator: Activator;
+    scopeSchema?: Schema;
+    modelSchema?: Schema;
+    properties?: {
+        [name: string]: DPath & {
+            handlername?: string;
+        };
     };
-    schema: Schema;
-    descriptor: NodeDescriptor;
-    props?: string[];
-};
-declare class RuntimeInfo {
-    meta: TMeta;
-    component: TComponent;
-    node: TNode;
-    model: TObservable;
-    scope: Scope;
-    parent: RuntimeInfo;
-    children: RuntimeInfo[];
-    mounted: boolean;
-    disposed: boolean;
-    constructor(meta: TMeta, opts: any, parent?: RuntimeInfo);
-    render(): any;
-    appendChild(child: RuntimeInfo): this;
-    mount(container: TNode): TComponent;
-    dispose(): void;
+    vnode?: TNodeDescriptor;
+    constructor(fn: Function);
+    tag(name: string): Meta;
+    props(names: {
+        [n: string]: string;
+    }): Meta;
+    static parseTemplateText: (text: string, self: any, model: any, scope: any) => TNodeDescriptor;
+    static components: {
+        [name: string]: Meta;
+    };
+    static modelname: string;
 }
-declare class Runtime {
-    roots: RuntimeInfo[];
-    timer: number;
-    tick: number;
-    constructor();
-    mount(container: TNode, renderer: any, opts?: any): RuntimeInfo;
-    private _addRoot;
-    private _tick;
+export declare function component(tag?: any, fn?: any): any;
+export declare type TBindScope = {
+    $superScope: TBindScope;
+    $fetch(name: string): TObservable;
+    $resolve(bindValue: any, expandOb?: boolean): any;
+    $createScope(name?: string, schema?: Schema): any;
+} & TObservable;
+export declare class BindScope extends Observable {
+    constructor(schema: Schema, name: string, superScope: BindScope, model: TObservable);
+    $createScope(name?: string, schema?: any): BindScope;
 }
-export declare let runtime: Runtime;
-export declare function mount(container: TNode, opts: any, extra?: any): any;
-declare type TRenderContext = {
-    descriptor: NodeDescriptor;
-    scope: any;
-    component: TComponent;
-};
-export declare function render(context: TRenderContext): any;
-export declare function resolveBindValue(bindValue: any, context: TRenderContext, bind?: (value: any, observable: TObservable) => any): {
-    value: any;
+export declare class ComponentRuntime {
+    opts: TNodeDescriptor;
+    meta: Meta;
+    parent?: ComponentRuntime;
+    instance: TComponent;
+    elements: any[];
+    model: Observable;
+    children: ComponentRuntime[];
+    services: InjectScope;
+    scope: BindScope;
+    slots: {
+        [name: string]: TNodeDescriptor[];
+    };
+    sid: string;
+    constructor(opts: TNodeDescriptor, meta: Meta, parent?: ComponentRuntime);
+    initialize(bindContext: TBindContext): void;
+    render(bindContext: TBindContext): any[];
+}
+export declare class PropertyBinding {
     observable: TObservable;
+    handler: Function;
+    constructor(bindValue: any);
+}
+export declare type TBindContext = {
+    component: ComponentRuntime;
+    scope: TBindScope;
+    options: any;
 };
 export declare class Component {
 }
 export declare type TNode = any;
-export declare function component(tag: string | Function, ctor?: Function): any;
 export declare const platform: {
     createElement(tag: string): any;
     createText(txt: string): any;

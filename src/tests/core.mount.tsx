@@ -7,4 +7,4 @@ function view(states){
     return <div><input type='text' value={states.inputText} onkeydown={inputChanged}/><span>{states.inputText}</span></div>
 }
 
-YA.mount(document.body,view)
+//YA.mount(document.body,view)
