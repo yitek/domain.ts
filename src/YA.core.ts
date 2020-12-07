@@ -386,23 +386,24 @@ export const None = new Proxy(function(){return this},{
 
 const dispose = function(handler?){
     if(handler===undefined){
-        const disposeHandlers = this['--disposes']
+        const disposeHandlers = this['--disposes--']
         if(disposeHandlers){
             for(const i in disposeHandlers){
                 disposeHandlers[i].call(this,this)
             }
         }
-        Object.defineProperty(this,'--disposes',{enumerable:false,configurable:false,writable:false,value:null})
-        Object.defineProperty(this,'$disposed',{enumerable:false,configurable:false,writable:false,value:true})
-        
+        if(disposeHandlers!==null){
+            Object.defineProperty(this,'--disposes--',{enumerable:false,configurable:false,writable:false,value:null})
+            Object.defineProperty(this,'$disposed',{enumerable:false,configurable:false,writable:false,value:true})
+        }
         return this
     }
-    let disposeHandlers = this['--disposes']
+    let disposeHandlers = this['--disposes--']
     if(disposeHandlers===null){
         handler.call(this,this)
         return this
     }
-    if(disposeHandlers===undefined) Object.defineProperty(this,'--disposes',{enumerable:false,configurable:true,writable:false,value: disposeHandlers=[]})
+    if(disposeHandlers===undefined) Object.defineProperty(this,'--disposes--',{enumerable:false,configurable:true,writable:false,value: disposeHandlers=[]})
     disposeHandlers.push(handler)
     return this
 
@@ -431,11 +432,13 @@ export class InjectScope extends Disposiable{
     constructor(public name?:string,public superScope?:InjectScope){
         super()
         this.factories = {}
-        this.$constant(InjectScope.svcname,this)
+        this.constant(InjectScope.svcname,this)
     }
 
     createScope(name?:string):InjectScope{
-        return new InjectScope(name,this)
+        const sub = new InjectScope(name,this)
+        this.$dispose(()=>sub.$dispose())
+        return sub
     }
     resolve(name:string,context?:any):any{
         let scope:InjectScope = this
@@ -448,13 +451,14 @@ export class InjectScope extends Disposiable{
         if(factory) return factory(name,this , context)
         return undefined
     }
-    register(name:string, ctor:{new(...args):any},singleon?:boolean):Activator{
+    register(name:string, ctor:{new(...args):any}|Function,singleon?:boolean):Activator{
         if(this.factories[name]) throw new Exception('已经注册过该依赖项:' + name)
         const activator = Activator.fetch(ctor)
-        let instance 
+        const notinitial = {}
+        let instance = notinitial
         const factory = (name,scope,context)=>{
-            if(singleon && instance!==undefined) return instance
-            let inst = activator.createInstance(scope)
+            if(singleon && instance!==notinitial) return instance
+            let inst = activator.createInstance(scope,undefined,undefined,context)
             if(inst && typeof inst.$dispose==='function') this.$dispose(()=>inst.$dispose())
             if(singleon) instance = inst
             return inst
@@ -462,17 +466,17 @@ export class InjectScope extends Disposiable{
         this.factories[name] = factory
         return activator
     }
-    $constant(name:string, value:any):InjectScope{
+    constant(name:string, value:any):InjectScope{
         if(this.factories[name]) throw new Exception('已经注册过该依赖项:' + name)
         this.factories[name] = (name,scope,context)=>value
         return this
     }
-    $factory(name:string, factory : TInjectFactory):InjectScope{
+    factory(name:string, factory : TInjectFactory):InjectScope{
         if(this.factories[name]) throw new Exception('已经注册过该依赖项:' + name)
         this.factories[name] = factory
         return this
     }
-    static global:InjectScope = new InjectScope()
+    static global:InjectScope = new InjectScope('<GLOBAL>')
     static svcname:string = 'services'
 }
 
@@ -491,20 +495,20 @@ export class Activator{
             } else depname = propname
         }
         propname = (propname as string).replace(trimRegx,'')
-        depname = depname.replace(trimRegx,'')
-        if(!propname || depname) throw new Exception('依赖必须指定属性名/依赖名')
+        depname = depname?depname.replace(trimRegx,''):propname
+        if(!propname) throw new Exception('依赖必须指定属性名/依赖名')
         this.depProps[propname] = depname
         return this
     }
-    createInstance(args?:any,constructing?:(selfInstance:any,args:any[],activator:Activator,rawArgs:any)=>any,constructed?:(selfInstance:any,activator:Activator)=>any){
+    createInstance(args?:any,constructing?:(selfInstance:any,args:any[],activator:Activator,rawArgs:any)=>any,constructed?:(selfInstance:any,activator:Activator)=>any,context?){
         let thisInstance:any = Object.create(this.ctor.prototype)
         
         let retInstance = thisInstance
         let ctorArgs =[]
         if(args instanceof InjectScope){
-            retInstance = createFromInjection(args as InjectScope,thisInstance,this)
+            ctorArgs = buildCtorArgsFromInjection(args as InjectScope,thisInstance,this,context)
         }else {
-            ctorArgs = buildCtorArgs(args,thisInstance,this.depProps,this.ctorArgs)
+            ctorArgs = buildCtorArgs(args,thisInstance,this)
         }
         if(constructing) retInstance = constructing(thisInstance,ctorArgs,this,args)
         if(retInstance!==undefined) thisInstance = retInstance
@@ -518,8 +522,8 @@ export class Activator{
         if(!(thisInstance instanceof this.ctor))(Object as any).setPrototypeOf(thisInstance, this.ctor.prototype);
         return thisInstance
     }
-    static activate(ctorPrProto:any,args?:any,constructing?:(selfInstance:any,args:any[],activator:Activator,rawArgs:any)=>any,constructed?:(selfInstance:any,activator:Activator)=>any){
-        return Activator.fetch(ctorPrProto).createInstance(args,constructing,constructed)
+    static activate(ctorPrProto:any,args?:any,constructing?:(selfInstance:any,args:any[],activator:Activator,rawArgs:any)=>any,constructed?:(selfInstance:any,activator:Activator)=>any,context?){
+        return Activator.fetch(ctorPrProto).createInstance(args,constructing,constructed,context)
     }
     static fetch(ctorOrProto:any):Activator{
         if(!ctorOrProto) return undefined
@@ -550,7 +554,10 @@ function parseDepdenceArgs(activator:Activator){
     activator.ctorArgs = args
 }
 
-function buildCtorArgs(args:any,thisInstance:any,depProps:{[name:string]:string},depArgs:string[]):any[]{
+function buildCtorArgs(args:any,thisInstance:any,activator:Activator):any[]{
+    if(!activator.ctorArgs) parseDepdenceArgs(activator)
+    const depArgs = activator.ctorArgs
+    const depProps = activator.depProps
     if(!args) return []
     if(is_array(args)) return args 
     if(typeof args === 'object'){
@@ -566,40 +573,40 @@ function buildCtorArgs(args:any,thisInstance:any,depProps:{[name:string]:string}
         return actualArgs
     }else return [args]
 }
-function createFromInjection(scope:InjectScope,selfInstance:any,activator:Activator){
+function buildCtorArgsFromInjection(scope:InjectScope,selfInstance:any,activator:Activator,context){
     if(!activator.ctorArgs) parseDepdenceArgs(activator)
-
-    if(this.props && this.props.length){
-        for(const propname in this.props){
-            const depname = this.props[propname]
-            const propValue = scope.resolve(depname)
+    if(activator.depProps){
+        for(const propname in activator.depProps){
+            const depname = activator.depProps[propname]
+            const propValue = scope.resolve(depname,context)
             selfInstance[propname] = propValue
         }
     }
-    if(this.args && this.args.length){
+    if(activator.ctorArgs && activator.ctorArgs.length){
         const args = []
-        for(const i in this.args){
-            const name = this.args[i]
-            const argValue = scope.resolve(name)
+        for(const i in activator.ctorArgs) {
+            const name = activator.ctorArgs[i]
+            const argValue = scope.resolve(name,context)
             args.push(argValue)
         }
-        return this.ctor.apply(selfInstance,args)
-    }else {
-        return this.ctor.call(selfInstance)
+        return args
     }
+    return []
 }
 
-export function injectable(ctorOrProto?:any){
-    const t = typeof ctorOrProto
-    if(t==='function' || t==='object') {
-        return Activator.fetch(ctorOrProto)
-    }
+export function injectable(map?:string|boolean){
     return function(target,name?){
-        const activator = Activator.fetch(ctorOrProto)
+        
+        
         if(name!==undefined) {
-            activator.prop(name,ctorOrProto)
+            const activator = Activator.fetch(target.constructor || target)
+            if(map===true) map = name
+            else if(map===false) return target
+            activator.prop(name,map as string)
+        }else{
+            const activator = Activator.fetch(target)
+            if(map===false)activator.ctorArgs=[]
         }
-        return target
     }
 }
 ////////////////////////////////////////////////////////////////

@@ -433,23 +433,25 @@ var __decorate = (this && this.__decorate) || function (decorators, target, key,
     });
     var dispose = function (handler) {
         if (handler === undefined) {
-            var disposeHandlers_1 = this['--disposes'];
+            var disposeHandlers_1 = this['--disposes--'];
             if (disposeHandlers_1) {
                 for (var i in disposeHandlers_1) {
                     disposeHandlers_1[i].call(this, this);
                 }
             }
-            Object.defineProperty(this, '--disposes', { enumerable: false, configurable: false, writable: false, value: null });
-            Object.defineProperty(this, '$disposed', { enumerable: false, configurable: false, writable: false, value: true });
+            if (disposeHandlers_1 !== null) {
+                Object.defineProperty(this, '--disposes--', { enumerable: false, configurable: false, writable: false, value: null });
+                Object.defineProperty(this, '$disposed', { enumerable: false, configurable: false, writable: false, value: true });
+            }
             return this;
         }
-        var disposeHandlers = this['--disposes'];
+        var disposeHandlers = this['--disposes--'];
         if (disposeHandlers === null) {
             handler.call(this, this);
             return this;
         }
         if (disposeHandlers === undefined)
-            Object.defineProperty(this, '--disposes', { enumerable: false, configurable: true, writable: false, value: disposeHandlers = [] });
+            Object.defineProperty(this, '--disposes--', { enumerable: false, configurable: true, writable: false, value: disposeHandlers = [] });
         disposeHandlers.push(handler);
         return this;
     };
@@ -476,11 +478,13 @@ var __decorate = (this && this.__decorate) || function (decorators, target, key,
             _this.name = name;
             _this.superScope = superScope;
             _this.factories = {};
-            _this.$constant(InjectScope.svcname, _this);
+            _this.constant(InjectScope.svcname, _this);
             return _this;
         }
         InjectScope.prototype.createScope = function (name) {
-            return new InjectScope(name, this);
+            var sub = new InjectScope(name, this);
+            this.$dispose(function () { return sub.$dispose(); });
+            return sub;
         };
         InjectScope.prototype.resolve = function (name, context) {
             var scope = this;
@@ -501,11 +505,12 @@ var __decorate = (this && this.__decorate) || function (decorators, target, key,
             if (this.factories[name])
                 throw new Exception('已经注册过该依赖项:' + name);
             var activator = Activator.fetch(ctor);
-            var instance;
+            var notinitial = {};
+            var instance = notinitial;
             var factory = function (name, scope, context) {
-                if (singleon && instance !== undefined)
+                if (singleon && instance !== notinitial)
                     return instance;
-                var inst = activator.createInstance(scope);
+                var inst = activator.createInstance(scope, undefined, undefined, context);
                 if (inst && typeof inst.$dispose === 'function')
                     _this.$dispose(function () { return inst.$dispose(); });
                 if (singleon)
@@ -515,19 +520,19 @@ var __decorate = (this && this.__decorate) || function (decorators, target, key,
             this.factories[name] = factory;
             return activator;
         };
-        InjectScope.prototype.$constant = function (name, value) {
+        InjectScope.prototype.constant = function (name, value) {
             if (this.factories[name])
                 throw new Exception('已经注册过该依赖项:' + name);
             this.factories[name] = function (name, scope, context) { return value; };
             return this;
         };
-        InjectScope.prototype.$factory = function (name, factory) {
+        InjectScope.prototype.factory = function (name, factory) {
             if (this.factories[name])
                 throw new Exception('已经注册过该依赖项:' + name);
             this.factories[name] = factory;
             return this;
         };
-        InjectScope.global = new InjectScope();
+        InjectScope.global = new InjectScope('<GLOBAL>');
         InjectScope.svcname = 'services';
         return InjectScope;
     }(Disposiable));
@@ -552,21 +557,21 @@ var __decorate = (this && this.__decorate) || function (decorators, target, key,
                     depname = propname;
             }
             propname = propname.replace(trimRegx, '');
-            depname = depname.replace(trimRegx, '');
-            if (!propname || depname)
+            depname = depname ? depname.replace(trimRegx, '') : propname;
+            if (!propname)
                 throw new Exception('依赖必须指定属性名/依赖名');
             this.depProps[propname] = depname;
             return this;
         };
-        Activator.prototype.createInstance = function (args, constructing, constructed) {
+        Activator.prototype.createInstance = function (args, constructing, constructed, context) {
             var thisInstance = Object.create(this.ctor.prototype);
             var retInstance = thisInstance;
             var ctorArgs = [];
             if (args instanceof InjectScope) {
-                retInstance = createFromInjection(args, thisInstance, this);
+                ctorArgs = buildCtorArgsFromInjection(args, thisInstance, this, context);
             }
             else {
-                ctorArgs = buildCtorArgs(args, thisInstance, this.depProps, this.ctorArgs);
+                ctorArgs = buildCtorArgs(args, thisInstance, this);
             }
             if (constructing)
                 retInstance = constructing(thisInstance, ctorArgs, this, args);
@@ -584,8 +589,8 @@ var __decorate = (this && this.__decorate) || function (decorators, target, key,
                 Object.setPrototypeOf(thisInstance, this.ctor.prototype);
             return thisInstance;
         };
-        Activator.activate = function (ctorPrProto, args, constructing, constructed) {
-            return Activator.fetch(ctorPrProto).createInstance(args, constructing, constructed);
+        Activator.activate = function (ctorPrProto, args, constructing, constructed, context) {
+            return Activator.fetch(ctorPrProto).createInstance(args, constructing, constructed, context);
         };
         Activator.fetch = function (ctorOrProto) {
             if (!ctorOrProto)
@@ -621,7 +626,11 @@ var __decorate = (this && this.__decorate) || function (decorators, target, key,
             args.push(argslist[i].replace(trimRegx, ''));
         activator.ctorArgs = args;
     }
-    function buildCtorArgs(args, thisInstance, depProps, depArgs) {
+    function buildCtorArgs(args, thisInstance, activator) {
+        if (!activator.ctorArgs)
+            parseDepdenceArgs(activator);
+        var depArgs = activator.ctorArgs;
+        var depProps = activator.depProps;
         if (!args)
             return [];
         if (is_array(args))
@@ -642,40 +651,42 @@ var __decorate = (this && this.__decorate) || function (decorators, target, key,
         else
             return [args];
     }
-    function createFromInjection(scope, selfInstance, activator) {
+    function buildCtorArgsFromInjection(scope, selfInstance, activator, context) {
         if (!activator.ctorArgs)
             parseDepdenceArgs(activator);
-        if (this.props && this.props.length) {
-            for (var propname in this.props) {
-                var depname = this.props[propname];
-                var propValue = scope.resolve(depname);
+        if (activator.depProps) {
+            for (var propname in activator.depProps) {
+                var depname = activator.depProps[propname];
+                var propValue = scope.resolve(depname, context);
                 selfInstance[propname] = propValue;
             }
         }
-        if (this.args && this.args.length) {
+        if (activator.ctorArgs && activator.ctorArgs.length) {
             var args = [];
-            for (var i in this.args) {
-                var name_2 = this.args[i];
-                var argValue = scope.resolve(name_2);
+            for (var i in activator.ctorArgs) {
+                var name_2 = activator.ctorArgs[i];
+                var argValue = scope.resolve(name_2, context);
                 args.push(argValue);
             }
-            return this.ctor.apply(selfInstance, args);
+            return args;
         }
-        else {
-            return this.ctor.call(selfInstance);
-        }
+        return [];
     }
-    function injectable(ctorOrProto) {
-        var t = typeof ctorOrProto;
-        if (t === 'function' || t === 'object') {
-            return Activator.fetch(ctorOrProto);
-        }
+    function injectable(map) {
         return function (target, name) {
-            var activator = Activator.fetch(ctorOrProto);
             if (name !== undefined) {
-                activator.prop(name, ctorOrProto);
+                var activator = Activator.fetch(target.constructor || target);
+                if (map === true)
+                    map = name;
+                else if (map === false)
+                    return target;
+                activator.prop(name, map);
             }
-            return target;
+            else {
+                var activator = Activator.fetch(target);
+                if (map === false)
+                    activator.ctorArgs = [];
+            }
         };
     }
     exports.injectable = injectable;

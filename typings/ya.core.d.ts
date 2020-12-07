@@ -110,9 +110,9 @@ export declare class InjectScope extends Disposiable {
     resolve(name: string, context?: any): any;
     register(name: string, ctor: {
         new (...args: any[]): any;
-    }, singleon?: boolean): Activator;
-    $constant(name: string, value: any): InjectScope;
-    $factory(name: string, factory: TInjectFactory): InjectScope;
+    } | Function, singleon?: boolean): Activator;
+    constant(name: string, value: any): InjectScope;
+    factory(name: string, factory: TInjectFactory): InjectScope;
     static global: InjectScope;
     static svcname: string;
 }
@@ -130,11 +130,11 @@ export declare class Activator {
     prop(propname: string | {
         [pname: string]: string;
     } | string[], depname?: string): Activator;
-    createInstance(args?: any, constructing?: (selfInstance: any, args: any[], activator: Activator, rawArgs: any) => any, constructed?: (selfInstance: any, activator: Activator) => any): any;
-    static activate(ctorPrProto: any, args?: any, constructing?: (selfInstance: any, args: any[], activator: Activator, rawArgs: any) => any, constructed?: (selfInstance: any, activator: Activator) => any): any;
+    createInstance(args?: any, constructing?: (selfInstance: any, args: any[], activator: Activator, rawArgs: any) => any, constructed?: (selfInstance: any, activator: Activator) => any, context?: any): any;
+    static activate(ctorPrProto: any, args?: any, constructing?: (selfInstance: any, args: any[], activator: Activator, rawArgs: any) => any, constructed?: (selfInstance: any, activator: Activator) => any, context?: any): any;
     static fetch(ctorOrProto: any): Activator;
 }
-export declare function injectable(ctorOrProto?: any): Activator | ((target: any, name?: any) => any);
+export declare function injectable(map?: string | boolean): (target: any, name?: any) => any;
 declare enum ModelSchemaTypes {
     constant = 0,
     value = 1,
