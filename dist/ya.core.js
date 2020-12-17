@@ -220,11 +220,12 @@ var __decorate = (this && this.__decorate) || function (decorators, target, key,
                     if (cloneInfo.origin === obj)
                         return cloneInfo.cloned;
                 }
-            var cloned = is_array(obj) ? [] : {};
-            _clones.push({ origin: obj, cloned: cloned });
+            var result = is_array(obj) ? [] : {};
+            _clones.push({ origin: obj, cloned: result });
             for (var n in obj) {
-                clone[n] = clone(obj[n], _clones);
+                result[n] = clone(obj[n], _clones);
             }
+            return result;
         }
         else
             return obj;
@@ -346,6 +347,7 @@ var __decorate = (this && this.__decorate) || function (decorators, target, key,
             data[curr.name || curr.index] = value;
             return this;
         };
+        DPath.prototype.toString = function () { return this.slashpath; };
         DPath.fetch = function (path) {
             var accessor = DPath.accessors[path];
             if (!accessor) {
@@ -439,8 +441,8 @@ var __decorate = (this && this.__decorate) || function (decorators, target, key,
         return accessable({ enumerable: false, writable: true, configurable: true }, target, name, value);
     }
     exports.implicit = implicit;
-    function constant(enumerable, target, name, value) {
-        return accessable({ enumerable: enumerable !== false, writable: false, configurable: true }, target, name, value);
+    function constant(enumerable, target, name, value, week) {
+        return accessable({ enumerable: enumerable !== false, writable: false, configurable: week ? true : false }, target, name, value);
     }
     exports.constant = constant;
     function nop() { }
@@ -741,26 +743,136 @@ var __decorate = (this && this.__decorate) || function (decorators, target, key,
         };
     }
     exports.injectable = injectable;
-    var ModelSchemaTypes;
-    (function (ModelSchemaTypes) {
-        ModelSchemaTypes[ModelSchemaTypes["constant"] = 0] = "constant";
-        ModelSchemaTypes[ModelSchemaTypes["value"] = 1] = "value";
-        ModelSchemaTypes[ModelSchemaTypes["object"] = 2] = "object";
-        ModelSchemaTypes[ModelSchemaTypes["array"] = 3] = "array";
-        ModelSchemaTypes[ModelSchemaTypes["computed"] = 4] = "computed";
-    })(ModelSchemaTypes || (ModelSchemaTypes = {}));
+    var ModelTypes;
+    (function (ModelTypes) {
+        ModelTypes[ModelTypes["constant"] = 0] = "constant";
+        ModelTypes[ModelTypes["value"] = 1] = "value";
+        ModelTypes[ModelTypes["object"] = 2] = "object";
+        ModelTypes[ModelTypes["array"] = 3] = "array";
+        ModelTypes[ModelTypes["computed"] = 4] = "computed";
+    })(ModelTypes = exports.ModelTypes || (exports.ModelTypes = {}));
     var Schema = /** @class */ (function () {
-        function Schema(defaultValue, name, superSchema) {
+        function Schema(defaultValue, name, superSchema, visitor) {
+            var type, _name, _default;
+            var fn, args;
+            if (defaultValue && (defaultValue.$modelType !== undefined || defaultValue.$fn)) {
+                type = defaultValue.$modelType;
+                _default = defaultValue.$value;
+                fn = defaultValue.$fn;
+                args = defaultValue.$args;
+                if (type === undefined && fn)
+                    type = ModelTypes.computed;
+                _name = name;
+            }
+            else
+                _default = defaultValue;
+            var t = typeof _default;
+            if (t === 'function') {
+                if (is_array(name)) {
+                    fn = defaultValue;
+                    args = name;
+                    type = ModelTypes.computed;
+                }
+                else if (!fn) {
+                    _default = defaultValue;
+                    type = ModelTypes.value;
+                    _name = name;
+                }
+            }
+            else if (t === 'object' && type === undefined) {
+                if (is_array(_default))
+                    type = ModelTypes.array;
+                else
+                    type = ModelTypes.object;
+            }
+            else
+                type = ModelTypes.value;
+            constant(false, this, {
+                '$name': name,
+                '$fn': fn,
+                '$args': args,
+                '$super': superSchema,
+                '$default': _default
+            });
+            constant(false, this, {
+                '$type': type, 'length': undefined, '$item': undefined, '--dpath--': undefined
+            }, undefined, true);
+            Object.defineProperty(this, '$dpath', { enumerable: false, configurable: false, get: function () {
+                    var dpath = this['--dpath--'];
+                    if (dpath)
+                        return dpath;
+                    if (this.$name && this.$super) {
+                        var path = this.$super.$dpath.slashpath + "/" + this.$name;
+                        dpath = DPath.fetch(path);
+                    }
+                    else {
+                        dpath = {
+                            slashpath: this.$name === undefined ? '' : this.$name,
+                            get: function (obj, name, context) { return obj; },
+                            set: function (obj, name, value, context) { },
+                            toString: function () { return this.slashpath; }
+                        };
+                    }
+                    Object.defineProperty(this, '--dpath--', { configurable: false, writable: false, enumerable: false, value: dpath });
+                    return dpath;
+                } });
+            if (type === ModelTypes.array) {
+                this.$asArray(clone(_default ? _default[0] : undefined));
+            }
+            else if (type === ModelTypes.object) {
+                for (var n in defaultValue) {
+                    this.$defineProp(n, clone(defaultValue[n]));
+                }
+            }
+        }
+        Schema_1 = Schema;
+        Schema.prototype.$defineProp = function (name, propDefaultValue, visitor) {
+            if (this.$type !== ModelTypes.object) {
+                if (this.$type !== ModelTypes.value)
+                    throw new Exception('只有type==value的Schema才能调用该函数', { 'schema': this });
+                Object.defineProperty(this, '$type', { enumerable: false, configurable: false, writable: false, value: ModelTypes.object });
+            }
+            var propSchema = new Schema_1(propDefaultValue, name, this, visitor);
+            Object.defineProperty(this, name, { configurable: false, writable: false, enumerable: true, value: propSchema });
+            return propSchema;
+        };
+        Schema.prototype.$asArray = function (defaultItemValue, visitor) {
+            if (this.$item)
+                throw new Exception('$asArray只能调用一次', { 'schema': this });
+            Object.defineProperty(this, '$type', { enumerable: false, configurable: false, writable: false, value: ModelTypes.array });
+            var lengthSchema = new Schema_1(0, 'length', this, visitor);
+            Object.defineProperty(this, 'length', { enumerable: false, configurable: false, writable: false, value: lengthSchema });
+            var itemSchema = new Schema_1(defaultItemValue, '[]', this);
+            Object.defineProperty(this, '$item', { configurable: false, writable: false, enumerable: false, value: itemSchema });
+            return itemSchema;
+        };
+        var Schema_1;
+        Schema = Schema_1 = __decorate([
+            implicit()
+        ], Schema);
+        return Schema;
+    }());
+    exports.Schema = Schema;
+    var ModelSchema = /** @class */ (function () {
+        function ModelSchema(defaultValue, name, superSchema, visitor) {
             var type;
             var deps;
             if (superSchema === 'constant') {
-                type = ModelSchemaTypes.constant;
+                type = ModelTypes.constant;
             }
             else if (superSchema === 'computed') {
-                type = ModelSchemaTypes.computed;
+                type = ModelTypes.computed;
                 deps = name;
                 superSchema = undefined;
             }
+            else if (typeof defaultValue === 'object') {
+                if (is_array(defaultValue))
+                    type = ModelTypes.array;
+                else
+                    type = ModelTypes.object;
+            }
+            else
+                type = ModelTypes.value;
             implicit(this, {
                 '$type': type,
                 '$name': name,
@@ -770,63 +882,67 @@ var __decorate = (this && this.__decorate) || function (decorators, target, key,
                 '$itemSchema': undefined,
                 'length': undefined
             });
-            if (!defaultValue || type === ModelSchemaTypes.constant || typeof defaultValue !== 'object')
+            if (!defaultValue || type === ModelTypes.constant || typeof defaultValue !== 'object') {
+                if (visitor)
+                    visitor.handler(this, visitor.parent);
                 return;
-            if (defaultValue.length !== undefined && defaultValue.push && defaultValue.pop) {
+            }
+            if (type === ModelTypes.array) {
                 this.$asArray(clone(defaultValue[0]));
             }
-            else {
+            else if (type === ModelTypes.object) {
                 for (var n in defaultValue)
                     this.$prop(n, clone(defaultValue[n]));
             }
         }
-        Schema_1 = Schema;
-        Schema.prototype.$prop = function (name, defaultValue) {
-            if (this.$type === ModelSchemaTypes.array)
+        ModelSchema_1 = ModelSchema;
+        ModelSchema.prototype.$prop = function (name, defaultValue) {
+            if (this.$type === ModelTypes.array)
                 throw new Exception('已经定义为array了', { 'schema': this });
-            this.$type = ModelSchemaTypes.object;
-            return this[name] || (this[name] = new Schema_1(defaultValue, name, this));
+            this.$type = ModelTypes.object;
+            return this[name] || (this[name] = new ModelSchema_1(defaultValue, name, this));
         };
-        Schema.prototype.$asArray = function (defaultItemValue) {
-            if (this.$type !== ModelSchemaTypes.value)
+        ModelSchema.prototype.$asArray = function (defaultItemValue, context) {
+            if (this.$type !== ModelTypes.value)
                 throw new Exception('已经定义为array/object了', { 'schema': this });
-            this.$type = ModelSchemaTypes.array;
-            var lengthSchema = new Schema_1(0, 'length', this);
+            this.$type = ModelTypes.array;
+            var lengthSchema = new ModelSchema_1(0, 'length', this);
             Object.defineProperty(this, 'length', { enumerable: false, configurable: false, writable: false, value: lengthSchema });
-            var itemSchema = new Schema_1(defaultItemValue, null, this);
-            return this.$itemSchema = itemSchema;
+            var itemSchema = new ModelSchema_1(defaultItemValue, null, this);
+            this.$itemSchema = itemSchema;
+            return itemSchema;
         };
-        Schema.prototype.$dataPath = function () {
+        ModelSchema.prototype.$dataPath = function () {
             var dpath = this['--data-path'];
             if (!dpath)
                 dpath = buildSchemaInfo.call(this).dataPath;
             return dpath;
         };
-        Schema.prototype.$paths = function () {
+        ModelSchema.prototype.$paths = function () {
             var paths = this['--paths'];
             if (!paths)
                 paths = buildSchemaInfo.call(this).paths;
             return paths;
         };
-        Schema.prototype.$root = function () {
+        ModelSchema.prototype.$root = function () {
             var root = this['--root'];
             if (!root)
                 root = buildSchemaInfo.call(this).root;
             return root;
         };
-        Schema.createBuilder = function (target) {
-            if (!target || target instanceof Schema_1)
-                return new Proxy(new Schema_1(), memberStatesTraps);
+        ModelSchema.createBuilder = function (target) {
+            if (!target || target instanceof ModelSchema_1)
+                return new Proxy(new ModelSchema_1(), memberStatesTraps);
             return new Proxy(target, rootStatesTraps);
         };
-        var Schema_1;
-        Schema.constant = new Schema_1(exports.None, '<CONSTANT>', 'constant');
-        Schema = Schema_1 = __decorate([
+        var ModelSchema_1;
+        ModelSchema.constant = new ModelSchema_1(exports.None, '<CONSTANT>', 'constant');
+        ModelSchema = ModelSchema_1 = __decorate([
             implicit()
-        ], Schema);
-        return Schema;
+        ], ModelSchema);
+        return ModelSchema;
     }());
-    exports.Schema = Schema;
+    exports.ModelSchema = ModelSchema;
     function buildSchemaInfo() {
         var schema = this;
         var paths = [];
@@ -956,10 +1072,10 @@ var __decorate = (this && this.__decorate) || function (decorators, target, key,
                 }
                 else if (value === Observable_1)
                     return _this;
-                else if (value === Schema)
+                else if (value === ModelSchema)
                     return _this.schema;
                 if (isSubscriber !== undefined) {
-                    if (_this.type !== ModelSchemaTypes.constant) {
+                    if (_this.type !== ModelTypes.constant) {
                         if (isSubscriber) {
                             if (capture)
                                 _this.capture(value, isSubscriber);
@@ -978,9 +1094,9 @@ var __decorate = (this && this.__decorate) || function (decorators, target, key,
                     return facade;
                 }
                 if (value) {
-                    if (value instanceof Schema)
+                    if (value instanceof ModelSchema)
                         throw new Exception('不能够将Schema赋值给observable');
-                    if (_this.schema.$type === ModelSchemaTypes.constant || _this.schema.$type === ModelSchemaTypes.computed)
+                    if (_this.schema.$type === ModelTypes.constant || _this.schema.$type === ModelTypes.computed)
                         return facade;
                     if (value['$Observable'])
                         value = value();
@@ -993,27 +1109,27 @@ var __decorate = (this && this.__decorate) || function (decorators, target, key,
             this.$observable = facade;
             Object.defineProperty(facade, '$Observable', { enumerable: false, configurable: false, writable: false, value: this });
             this.name = name || schema.$name;
-            if (superOb === 'constant' || ((_a = schema) === null || _a === void 0 ? void 0 : _a.$type) === ModelSchemaTypes.constant) {
-                this.type = ModelSchemaTypes.constant;
+            if (superOb === 'constant' || ((_a = schema) === null || _a === void 0 ? void 0 : _a.$type) === ModelTypes.constant) {
+                this.type = ModelTypes.constant;
                 return;
             }
-            if (superOb === 'computed' || ((_b = schema) === null || _b === void 0 ? void 0 : _b.$type) === ModelSchemaTypes.computed) {
-                this.type = ModelSchemaTypes.computed;
+            if (superOb === 'computed' || ((_b = schema) === null || _b === void 0 ? void 0 : _b.$type) === ModelTypes.computed) {
+                this.type = ModelTypes.computed;
                 return;
             }
-            schema = this.schema = schema || new Schema(initial, name);
+            schema = this.schema = schema || new ModelSchema(initial, name);
             this.type = schema.$type;
-            if (this.type === ModelSchemaTypes.object) {
+            if (this.type === ModelTypes.object) {
                 initObservableObject.call(this, facade, initial, schema);
             }
-            else if (this.type === ModelSchemaTypes.array) {
+            else if (this.type === ModelTypes.array) {
                 initObservableArray.call(this, facade, initial, schema);
             }
-            else if (this.type === ModelSchemaTypes.constant) {
+            else if (this.type === ModelTypes.constant) {
                 this.get = function () { return schema.$defaultValue; };
                 this.update = this.set = this.subscribe = this.unsubscribe = this.capture = this.uncapture = function () { return _this; };
             }
-            else if (this.type === ModelSchemaTypes.computed) {
+            else if (this.type === ModelTypes.computed) {
                 initObservableComputed.call(this, facade, initial, schema);
             }
             else {
@@ -1030,10 +1146,10 @@ var __decorate = (this && this.__decorate) || function (decorators, target, key,
             return this;
         };
         Observable.prototype.defineProp = function (name, initial) {
-            if (this.type === ModelSchemaTypes.value) {
+            if (this.type === ModelTypes.value) {
                 initObservableObject.call(this, this.$observable, {});
             }
-            else if (this.type === ModelSchemaTypes.array)
+            else if (this.type === ModelTypes.array)
                 throw new Exception('数组不能定义成员');
             else if (this.$observable[name])
                 throw new Exception('已经有该成员');
@@ -1243,10 +1359,10 @@ var __decorate = (this && this.__decorate) || function (decorators, target, key,
     }
     var Meta = /** @class */ (function () {
         function Meta(fn) {
-            var scopeSchema = this.scopeSchema = new Schema();
-            var modelSchema = this.modelSchema = new Schema(undefined, Meta.modelname);
-            var modelSchemaProxy = Schema.createBuilder(modelSchema);
-            var scopeSchemaProxy = Schema.createBuilder(scopeSchema);
+            var scopeSchema = this.scopeSchema = new ModelSchema();
+            var modelSchema = this.modelSchema = new ModelSchema(undefined, Meta.modelname);
+            var modelSchemaProxy = ModelSchema.createBuilder(modelSchema);
+            var scopeSchemaProxy = ModelSchema.createBuilder(scopeSchema);
             var self = fn.prototype;
             var renderer = fn.render || fn.prototype.render;
             var vnode;
@@ -1346,11 +1462,11 @@ var __decorate = (this && this.__decorate) || function (decorators, target, key,
             }
             return undefined;
         }
-        if (bindValue instanceof Schema) {
-            if (bindValue.$type === ModelSchemaTypes.constant) {
+        if (bindValue instanceof ModelSchema) {
+            if (bindValue.$type === ModelTypes.constant) {
                 return new Observable(undefined, bindValue, undefined, '<CONSTANT>').$observable;
             }
-            else if (bindValue.$type === ModelSchemaTypes.computed) {
+            else if (bindValue.$type === ModelTypes.computed) {
                 return new Observable(undefined, bindValue, undefined, '<COMPUTED>').$observable;
             }
             var paths = bindValue.$paths();

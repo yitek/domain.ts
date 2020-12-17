@@ -71,6 +71,7 @@ export declare class DPath {
     constructor(dpath: string);
     get(target: any, context?: any): any;
     set(target: any, value: any, context?: any): DPath;
+    toString(): string;
     static fetch(path: string): DPath;
     static getValue(target: any, dpath: string, context?: any): any;
     static setValue(target: any, dpath: string, value: any, context?: any): DPath;
@@ -92,7 +93,7 @@ export declare function accessable(desc: any, target?: any, name?: any, value?: 
  * @returns
  */
 export declare function implicit(target?: any, name?: any, value?: any): any;
-export declare function constant(enumerable?: boolean, target?: any, name?: any, value?: any): any;
+export declare function constant(enumerable?: boolean, target?: any, name?: any, value?: any, week?: boolean): any;
 export declare function nop(): void;
 export declare class Exception extends Error {
     constructor(msg: any, detail?: any);
@@ -142,7 +143,7 @@ export declare class Activator {
     static fetch(ctorOrProto: any): Activator;
 }
 export declare function injectable(map?: string | boolean): (target: any, name?: any) => any;
-declare enum ModelSchemaTypes {
+export declare enum ModelTypes {
     constant = 0,
     value = 1,
     object = 2,
@@ -150,23 +151,41 @@ declare enum ModelSchemaTypes {
     computed = 4
 }
 export declare class Schema {
-    $type: ModelSchemaTypes;
+    $type: ModelTypes;
     $name?: string;
-    $superSchema?: Schema;
+    $super?: Schema;
+    $default?: any;
+    $fn?: Function;
+    $args?: Schema[];
+    $item?: ModelSchema;
+    length?: ModelSchema;
+    $dpath: DPath;
+    private '--dpath--'?;
+    constructor(defaultValue: any, name?: string | Schema[], superSchema?: any, visitor?: any);
+    $defineProp(name: string, propDefaultValue?: any, visitor?: any): Schema;
+    $asArray(defaultItemValue?: any, visitor?: any): Schema;
+}
+export declare class ModelSchema {
+    $type: ModelTypes;
+    $name?: string;
+    $superSchema?: ModelSchema;
     $defaultValue?: any;
-    $dependenceSchemas: Schema[];
-    $itemSchema?: Schema;
-    length?: Schema;
+    $dependenceSchemas?: ModelSchema[];
+    $itemSchema?: ModelSchema;
+    length?: ModelSchema;
     private '--root'?;
     private '--paths'?;
-    constructor(defaultValue?: any, name?: string | Schema[], superSchema?: any);
-    $prop(name: string, defaultValue?: any): Schema;
-    $asArray(defaultItemValue?: any): Schema;
+    constructor(defaultValue?: any, name?: string | ModelSchema[], superSchema?: any, visitor?: {
+        handler: (schema: ModelSchema, parent: any) => any;
+        parent: any;
+    });
+    $prop(name: string, defaultValue?: any): ModelSchema;
+    $asArray(defaultItemValue?: any, context?: any): ModelSchema;
     $dataPath(): DPath;
     $paths(): string[];
-    $root(): Schema;
-    static createBuilder(target: Schema): any;
-    static constant: Schema;
+    $root(): ModelSchema;
+    static createBuilder(target: ModelSchema): any;
+    static constant: ModelSchema;
 }
 export declare function eventable(target: any, name: any): void;
 export declare function subscribable(target: any): void;
@@ -178,7 +197,7 @@ export declare class Subscription {
 }
 export declare type TNodeDescriptor = {
     tag?: string;
-    content?: string | Schema | TObservable;
+    content?: string | ModelSchema | TObservable;
     component?: any;
     attrs?: {
         [name: string]: any;
@@ -201,11 +220,11 @@ export declare type TObservable = {
     '$Observable': Observable;
 };
 export declare class Observable {
-    type: ModelSchemaTypes;
+    type: ModelTypes;
     name: string;
     old: any;
     value: any;
-    schema: Schema;
+    schema: ModelSchema;
     super?: Observable;
     deps?: Observable[];
     dep_handler?: (evt: TObservableEvent) => any;
@@ -218,7 +237,7 @@ export declare class Observable {
     }[];
     hasChanges?: boolean;
     length?: Observable;
-    constructor(initial: any, schema?: Schema, name?: string, superOb?: Observable | string);
+    constructor(initial: any, schema?: ModelSchema, name?: string, superOb?: Observable | string);
     get(): any;
     set(value: any): Observable;
     defineProp(name: string, initial?: any): Observable;
@@ -233,8 +252,8 @@ export declare class Meta {
     tagName?: string;
     resolved?: boolean;
     activator: Activator;
-    scopeSchema?: Schema;
-    modelSchema?: Schema;
+    scopeSchema?: ModelSchema;
+    modelSchema?: ModelSchema;
     properties?: {
         [name: string]: DPath & {
             handlername?: string;
@@ -257,10 +276,10 @@ export declare type TBindScope = {
     $superScope: TBindScope;
     $fetch(name: string): TObservable;
     $resolve(bindValue: any, expandOb?: boolean): any;
-    $createScope(name?: string, schema?: Schema): any;
+    $createScope(name?: string, schema?: ModelSchema): any;
 } & TObservable;
 export declare class BindScope extends Observable {
-    constructor(schema: Schema, name: string, superScope: BindScope, model: TObservable);
+    constructor(schema: ModelSchema, name: string, superScope: BindScope, model: TObservable);
     $createScope(name?: string, schema?: any): BindScope;
 }
 export declare class ComponentRuntime {
