@@ -187,82 +187,111 @@ export let extend :(...args)=>any= function (){
     return target;
 }
 
-
+const dpathTrimRegx =/(^[ .\/]+)|(\s+$)/g
+const uintRegx =/^\s*d+\s*$/g;
+type TDPathItem = {name:string,index:number,prev?:TDPathItem,next?:TDPathItem}
 export class DPath{
-    public dpath:string
-    public getters:{(value,sure,context?):any}[]
-    public last:string
-    constructor(dpath:string,splitor='/'){
-        dpath = this.dpath = dpath.replace(trimRegx,'')
-        const getters = []
+    public raw:string
+    public dotpath:string
+    public slashpath:string
+    public first:TDPathItem
+    public last:TDPathItem
+    public deep:number;
+    constructor(dpath:string){
+        this.raw = dpath
+        dpath = dpath.replace(dpathTrimRegx,'')
+        if(!this.raw) throw new Exception('不正确的dpath表达式:' + dpath)
+        let pathnames:string[]
+        if(dpath.indexOf('/')>=0) pathnames = dpath.split('/')
+        else pathnames = dpath.split('.')
+        this.deep = pathnames.length
+        this.dotpath = pathnames.join('.')
+        this.slashpath = pathnames.join('/')
+        let isProp = !uintRegx.test(pathnames[0])
+        let curr:TDPathItem = this.first = {name:isProp?pathnames[0]:undefined,index:isProp?undefined:parseInt(pathnames[0])}
+        for(let i =1,j=pathnames.length;i<j;i++) {
+            let name = pathnames[i]
+            const isProp = !uintRegx.test(name)
+            let index:number = undefined
+            if(!isProp) {index = parseInt(name);name= undefined}
+
+            const item = {name:name,index:index,prev:curr}
+            curr.next= item
+            curr = item
+        }
+        this.last = curr
         
-        const paths = dpath.split(splitor)
-        const first = paths.shift()
-        getters.push((current,sure,context)=>context[first])
-        
-        for(let i=0,j=paths.length-1;i<=j;i++)((name,index,paths,getters,isLast)=>{
-            let isArray = false
-            if(!isLast){
-                const nextKey = paths[index+1]
-                isArray = (intRegx.test(nextKey))
-                getters.push((current,sure)=>{
-                    let value = current[name]
-                    if(sure && !value){
-                        value = current[name] = isArray?[]:{}
-                    }
-                    return value
-                })
-            }else{
-                this.last = name
-                getters.push((current,sure)=>current?current[name]:undefined)
+
+    }
+    get(target,context?){
+        let data :any
+        const firstName = this.first.name
+        if(context){
+            if(context.call && context.apply) data = context(firstName,target)
+            else{
+                data = context[firstName]
+                if (data===undefined && target) data = target[firstName]
+            } 
+        }else if(target) data = target[firstName]
+        if(!data) return data
+        let curr = this.first.next
+        while(curr) {
+            data = data[curr.name]
+            if(!data) return data
+            curr = curr.next
+        }
+        return data
+    }
+    set(target:any,value:any,context?):DPath{
+        if(!target) return this
+        if(this.deep===1) {
+            if(context) {
+                if(context.call && context.apply) context(this.first,target,true,value)
+                else target[this.first.name] = value
+            } else target[this.first.name]=value
+        }
+        let data :any
+        if(context){
+            if(context.call && context.apply) data = context(this.first,target)
+            else data = target[this.first.name]
+        }else data = target[this.first.name]
+        let prevobj = target
+        let curr = this.first.next
+        while(curr!==this.last){
+            if(!data) {
+                const prev = curr.prev
+                if(curr.index!==undefined){
+                    data = prevobj[prev.name||prev.index] = [] 
+                }else data = prevobj[prev.name||prev.index] = {}
+                curr = curr.next
             }
-            
-        })(paths[i],i,paths,getters,i===j)
-        this.getters = getters
-    }
-    get(target,sure?,context?){
-        if(sure===true || sure===false){
-            context = context || {}
-            context[''] = target
-        } else if(context===undefined){
-            context = sure || {}
-            context[''] = target
-            sure = false
+            prevobj = data;data=data[curr.name||curr.index];curr = curr.next
         }
-        let value =target
-        for(const i in this.getters){
-            value = this.getters[i](value,sure, context)
-        }
-        return value
-    }
-    set(target:any,value:any,context?){
-        context ||(context={})
-        context[''] = target
-        for(let i = 0,j=this.getters.length-1;i<j;i++){
-            target = this.getters[i](target,true, context)
-        }
-        target[this.last] = value
+        if(!data) {
+            const prev = curr.prev
+            if(curr.index!==undefined){
+                data = prevobj[prev.name||prev.index] = [] 
+            }else data = prevobj[prev.name||prev.index] = {}
+        } 
+        data[curr.name||curr.index] = value
         return this
     }
     static fetch(path:string){
         let accessor = DPath.accessors[path]
         if(!accessor){
             accessor = DPath.accessors[path] = new DPath(path)
-            DPath.accessors[accessor.dpath] = accessor
+            DPath.accessors[accessor.dotpath] = accessor
         }
         return accessor
     }
-    static getValue(target:any,dpath:string,sure?,context?){
-        return DPath.fetch(dpath).get(target,sure, context)
+    static getValue(target:any,dpath:string,context?){
+        return DPath.fetch(dpath).get(target, context)
     }
     static setValue(target:any, dpath:string,value:any,context?){
         return DPath.fetch(dpath).set(target,value,context)
     }
     static accessors : {[path:string]:DPath} = {}
 }
-
-
-
 
 
 //////////////////////////////////////////////////////////

@@ -240,71 +240,122 @@ var __decorate = (this && this.__decorate) || function (decorators, target, key,
         }
         return target;
     };
+    var dpathTrimRegx = /(^[ .\/]+)|(\s+$)/g;
+    var uintRegx = /^\s*d+\s*$/g;
     var DPath = /** @class */ (function () {
-        function DPath(dpath, splitor) {
-            var _this = this;
-            if (splitor === void 0) { splitor = '/'; }
-            dpath = this.dpath = dpath.replace(trimRegx, '');
-            var getters = [];
-            var paths = dpath.split(splitor);
-            var first = paths.shift();
-            getters.push(function (current, sure, context) { return context[first]; });
-            for (var i = 0, j = paths.length - 1; i <= j; i++)
-                (function (name, index, paths, getters, isLast) {
-                    var isArray = false;
-                    if (!isLast) {
-                        var nextKey = paths[index + 1];
-                        isArray = (intRegx.test(nextKey));
-                        getters.push(function (current, sure) {
-                            var value = current[name];
-                            if (sure && !value) {
-                                value = current[name] = isArray ? [] : {};
-                            }
-                            return value;
-                        });
-                    }
-                    else {
-                        _this.last = name;
-                        getters.push(function (current, sure) { return current ? current[name] : undefined; });
-                    }
-                })(paths[i], i, paths, getters, i === j);
-            this.getters = getters;
+        function DPath(dpath) {
+            this.raw = dpath;
+            dpath = dpath.replace(dpathTrimRegx, '');
+            if (!this.raw)
+                throw new Exception('不正确的dpath表达式:' + dpath);
+            var pathnames;
+            if (dpath.indexOf('/') >= 0)
+                pathnames = dpath.split('/');
+            else
+                pathnames = dpath.split('.');
+            this.deep = pathnames.length;
+            this.dotpath = pathnames.join('.');
+            this.slashpath = pathnames.join('/');
+            var isProp = !uintRegx.test(pathnames[0]);
+            var curr = this.first = { name: isProp ? pathnames[0] : undefined, index: isProp ? undefined : parseInt(pathnames[0]) };
+            for (var i = 1, j = pathnames.length; i < j; i++) {
+                var name_1 = pathnames[i];
+                var isProp_1 = !uintRegx.test(name_1);
+                var index = undefined;
+                if (!isProp_1) {
+                    index = parseInt(name_1);
+                    name_1 = undefined;
+                }
+                var item = { name: name_1, index: index, prev: curr };
+                curr.next = item;
+                curr = item;
+            }
+            this.last = curr;
         }
-        DPath.prototype.get = function (target, sure, context) {
-            if (sure === true || sure === false) {
-                context = context || {};
-                context[''] = target;
+        DPath.prototype.get = function (target, context) {
+            var data;
+            var firstName = this.first.name;
+            if (context) {
+                if (context.call && context.apply)
+                    data = context(firstName, target);
+                else {
+                    data = context[firstName];
+                    if (data === undefined && target)
+                        data = target[firstName];
+                }
             }
-            else if (context === undefined) {
-                context = sure || {};
-                context[''] = target;
-                sure = false;
+            else if (target)
+                data = target[firstName];
+            if (!data)
+                return data;
+            var curr = this.first.next;
+            while (curr) {
+                data = data[curr.name];
+                if (!data)
+                    return data;
+                curr = curr.next;
             }
-            var value = target;
-            for (var i in this.getters) {
-                value = this.getters[i](value, sure, context);
-            }
-            return value;
+            return data;
         };
         DPath.prototype.set = function (target, value, context) {
-            context || (context = {});
-            context[''] = target;
-            for (var i = 0, j = this.getters.length - 1; i < j; i++) {
-                target = this.getters[i](target, true, context);
+            if (!target)
+                return this;
+            if (this.deep === 1) {
+                if (context) {
+                    if (context.call && context.apply)
+                        context(this.first, target, true, value);
+                    else
+                        target[this.first.name] = value;
+                }
+                else
+                    target[this.first.name] = value;
             }
-            target[this.last] = value;
+            var data;
+            if (context) {
+                if (context.call && context.apply)
+                    data = context(this.first, target);
+                else
+                    data = target[this.first.name];
+            }
+            else
+                data = target[this.first.name];
+            var prevobj = target;
+            var curr = this.first.next;
+            while (curr !== this.last) {
+                if (!data) {
+                    var prev = curr.prev;
+                    if (curr.index !== undefined) {
+                        data = prevobj[prev.name || prev.index] = [];
+                    }
+                    else
+                        data = prevobj[prev.name || prev.index] = {};
+                    curr = curr.next;
+                }
+                prevobj = data;
+                data = data[curr.name || curr.index];
+                curr = curr.next;
+            }
+            if (!data) {
+                var prev = curr.prev;
+                if (curr.index !== undefined) {
+                    data = prevobj[prev.name || prev.index] = [];
+                }
+                else
+                    data = prevobj[prev.name || prev.index] = {};
+            }
+            data[curr.name || curr.index] = value;
             return this;
         };
         DPath.fetch = function (path) {
             var accessor = DPath.accessors[path];
             if (!accessor) {
                 accessor = DPath.accessors[path] = new DPath(path);
-                DPath.accessors[accessor.dpath] = accessor;
+                DPath.accessors[accessor.dotpath] = accessor;
             }
             return accessor;
         };
-        DPath.getValue = function (target, dpath, sure, context) {
-            return DPath.fetch(dpath).get(target, sure, context);
+        DPath.getValue = function (target, dpath, context) {
+            return DPath.fetch(dpath).get(target, context);
         };
         DPath.setValue = function (target, dpath, value, context) {
             return DPath.fetch(dpath).set(target, value, context);
@@ -354,8 +405,8 @@ var __decorate = (this && this.__decorate) || function (decorators, target, key,
         }
         if (typeof name === 'object') {
             if (is_array(name)) {
-                for (var _i = 0, name_1 = name; _i < name_1.length; _i++) {
-                    var membername = name_1[_i];
+                for (var _i = 0, name_2 = name; _i < name_2.length; _i++) {
+                    var membername = name_2[_i];
                     desc.value = target[membername];
                     Object.defineProperty(target, membername, desc);
                 }
@@ -664,8 +715,8 @@ var __decorate = (this && this.__decorate) || function (decorators, target, key,
         if (activator.ctorArgs && activator.ctorArgs.length) {
             var args = [];
             for (var i in activator.ctorArgs) {
-                var name_2 = activator.ctorArgs[i];
-                var argValue = scope.resolve(name_2, context);
+                var name_3 = activator.ctorArgs[i];
+                var argValue = scope.resolve(name_3, context);
                 args.push(argValue);
             }
             return args;
@@ -1068,8 +1119,8 @@ var __decorate = (this && this.__decorate) || function (decorators, target, key,
             if (!value)
                 value = {};
             var facade = _this.facade;
-            for (var name_3 in facade) {
-                facade[name_3](value[name_3]);
+            for (var name_4 in facade) {
+                facade[name_4](value[name_4]);
             }
             _this.value = value;
             return _this;
@@ -1088,9 +1139,9 @@ var __decorate = (this && this.__decorate) || function (decorators, target, key,
             return _this;
         };
         this.old = initial || {};
-        for (var name_4 in schema) {
-            var member = new Observable(this.old[name_4], schema[name_4], this, name_4);
-            Object.defineProperty(facade, name_4, { enumerable: true, configurable: false, writable: false, value: member.$observable });
+        for (var name_5 in schema) {
+            var member = new Observable(this.old[name_5], schema[name_5], this, name_5);
+            Object.defineProperty(facade, name_5, { enumerable: true, configurable: false, writable: false, value: member.$observable });
         }
     }
     function initObservableArray(facade, initial, schema) {
@@ -1100,14 +1151,14 @@ var __decorate = (this && this.__decorate) || function (decorators, target, key,
                 value = [];
             var facade = _this.$observable;
             for (var i = 0, j = value.length; i < j; i++) {
-                var name_5 = i.toString();
-                var item = facade[name_5];
+                var name_6 = i.toString();
+                var item = facade[name_6];
                 if (item) {
                     item(value[i]);
                     continue;
                 }
-                item = new Observable(value[i], _this.$schema.$item, _this, name_5);
-                Object.defineProperty(facade, name_5, { configurable: true, writable: false, enumerable: true, value: item.facade });
+                item = new Observable(value[i], _this.$schema.$item, _this, name_6);
+                Object.defineProperty(facade, name_6, { configurable: true, writable: false, enumerable: true, value: item.facade });
             }
             _this.value = value;
             _this.length.set(value.length);
@@ -1141,9 +1192,9 @@ var __decorate = (this && this.__decorate) || function (decorators, target, key,
         this.old = initial || [];
         if (initial)
             for (var i = 0, j = initial.length; i < j; i++) {
-                var name_6 = i.toString();
-                var itemObservable = new Observable(initial[i], this.schema.$itemSchema, this, name_6);
-                Object.defineProperty(facade, name_6, { enumerable: false, configurable: true, writable: false, value: itemObservable.$observable });
+                var name_7 = i.toString();
+                var itemObservable = new Observable(initial[i], this.schema.$itemSchema, this, name_7);
+                Object.defineProperty(facade, name_7, { enumerable: false, configurable: true, writable: false, value: itemObservable.$observable });
             }
     }
     function initObservableComputed(facade, initial, schema) {
@@ -1232,11 +1283,11 @@ var __decorate = (this && this.__decorate) || function (decorators, target, key,
                 this.properties = {};
             }
             for (var n in names) {
-                var name_7 = trim(n);
+                var name_8 = trim(n);
                 var path = trim(names[n]);
-                if (name_7 && path) {
-                    var dpath = this.properties[name_7] = new DPath(path);
-                    dpath.handlername = '@' + name_7;
+                if (name_8 && path) {
+                    var dpath = this.properties[name_8] = new DPath(path);
+                    dpath.handlername = '@' + name_8;
                 }
             }
             return this;

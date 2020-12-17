@@ -55,17 +55,24 @@ export declare function array_add_unique(arr: any[], item: any): boolean;
 export declare function array_remove(arr: any[], item: any): boolean;
 export declare function clone(obj: any, _clones?: any[]): any;
 export declare let extend: (...args: any[]) => any;
+declare type TDPathItem = {
+    name: string;
+    index: number;
+    prev?: TDPathItem;
+    next?: TDPathItem;
+};
 export declare class DPath {
-    dpath: string;
-    getters: {
-        (value: any, sure: any, context?: any): any;
-    }[];
-    last: string;
-    constructor(dpath: string, splitor?: string);
-    get(target: any, sure?: any, context?: any): any;
-    set(target: any, value: any, context?: any): this;
+    raw: string;
+    dotpath: string;
+    slashpath: string;
+    first: TDPathItem;
+    last: TDPathItem;
+    deep: number;
+    constructor(dpath: string);
+    get(target: any, context?: any): any;
+    set(target: any, value: any, context?: any): DPath;
     static fetch(path: string): DPath;
-    static getValue(target: any, dpath: string, sure?: any, context?: any): any;
+    static getValue(target: any, dpath: string, context?: any): any;
     static setValue(target: any, dpath: string, value: any, context?: any): DPath;
     static accessors: {
         [path: string]: DPath;
