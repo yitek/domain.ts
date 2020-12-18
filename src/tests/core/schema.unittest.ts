@@ -1,6 +1,5 @@
 import {testable} from '../../YA.unittest'
 import {Schema,ModelTypes} from '../../YA.core'
-
 testable('core.Schema',{
     '基础用法':(ASSERT)=>{
         const schemaValue = new Schema(12)
@@ -28,8 +27,23 @@ testable('core.Schema',{
     '组合对象与路径':(ASSERT)=>{
         const data = {filters:{name:'yi'},rows:[{id:1,intrests:['football']}],pageIndex:1}
         const schema :any= new Schema(data,'<states>')
+        
         ASSERT({
             '可以获得路径':()=>schema.filters.name.$dpath.toString()==='<states>/filters/name'
+        })
+        const name = schema.filters.name.$dpath.get(data,(name,data)=>{
+            return data
+        })
+        ASSERT({'可根据路径获取数据':()=>name==='yi'
+        })
+    },
+    '通过代理来构建schema':(ASSERT)=>{
+        const proxy = Schema.proxy();
+        const displayName = proxy.filters.profile.displayName
+        const schema = proxy.$schema
+        ASSERT({
+            '通过代理可以构建数据架构':()=>schema.filters.profile.displayName instanceof Schema,
+            '获取到的数据架构对象有正确的dpath':()=>displayName.$dpath.toString()==='filters/profile/displayName'
         })
     }
 })

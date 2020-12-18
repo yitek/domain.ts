@@ -164,6 +164,7 @@ export declare class Schema {
     constructor(defaultValue: any, name?: string | Schema[], superSchema?: any, visitor?: any);
     $defineProp(name: string, propDefaultValue?: any, visitor?: any): Schema;
     $asArray(defaultItemValue?: any, visitor?: any): Schema;
+    static proxy(target?: any): any;
 }
 export declare class ModelSchema {
     $type: ModelTypes;

@@ -311,16 +311,16 @@ var __extends = (this && this.__extends) || (function () {
                 if (desp && (desp === '<class>' || desp.isClass)) {
                     var tc = TestClass.fetch(test, desp.name);
                     if (meta(tc, desp) !== false)
-                        return todos.push(tc);
+                        return addTodos(tc);
                 }
                 var tm = TestMethod.fetch(test);
                 if (meta(tm, desp) !== false)
-                    return todos.push(tm);
+                    return addTodos(tm);
             }
             else if (t === 'object') {
                 var tc = TestClass.fetch(test);
                 if (meta(tc, desp) !== false)
-                    return todos.push(tc);
+                    return addTodos(tc);
             }
             throw '错误的参数';
         }
@@ -340,13 +340,25 @@ var __extends = (this && this.__extends) || (function () {
         };
     }
     exports.testable = testable;
-    setTimeout(function () {
-        if (todos.length) {
-            var executable = void 0;
-            while (executable = todos.shift())
-                executable.execute(Logger.default);
+    var tickTodo;
+    function addTodos(executable) {
+        if (todos.length === 0 && !tickTodo) {
+            tickTodo = setTimeout(function () {
+                if (todos.length) {
+                    try {
+                        var executable_1;
+                        while (executable_1 = todos.shift())
+                            executable_1.execute(Logger.default);
+                    }
+                    finally {
+                        clearTimeout(tickTodo);
+                        tickTodo = 0;
+                    }
+                }
+            }, 0);
         }
-    }, 0);
+        todos.push(executable);
+    }
     var tests = {
         testA: function (ASSERTS) {
             var a = 1;

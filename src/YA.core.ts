@@ -736,7 +736,7 @@ export class Schema{
             Object.defineProperty(this,'$type',{enumerable:false,configurable:false,writable:false,value:ModelTypes.object})
         } 
         const propSchema = new Schema(propDefaultValue,name,this,visitor)
-        Object.defineProperty(this,name,{configurable:false,writable:false,enumerable:true,value:propSchema})
+        Object.defineProperty(this,name,{configurable:true,writable:false,enumerable:true,value:propSchema})
         return propSchema
     }
 
@@ -749,7 +749,24 @@ export class Schema{
         Object.defineProperty(this,'$item',{configurable:false,writable:false,enumerable:false,value:itemSchema})
         return itemSchema
     }
+    static proxy(target?){
+        if(!target || !(target instanceof Schema)) return new Proxy(new Schema(target),schemaProxyTraps)
+        return new Proxy(target,schemaProxyTraps);
+    }
 }
+
+const schemaProxyTraps = {
+    get(schema: Schema,propname:string){
+        if(propname==='$schema') return schema;
+        let existed = schema[propname]
+        if(existed) return existed
+        existed = schema.$defineProp(propname)
+        return new Proxy(existed,schemaProxyTraps);
+    },
+    set(target:ModelSchema,propname:string,value:any){
+        throw new Exception('schemaBuilder不可以在schemaBuilder上做赋值操作');
+    }
+};
 
 @implicit()
 export class ModelSchema {

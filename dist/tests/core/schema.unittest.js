@@ -41,6 +41,20 @@
             ASSERT({
                 '可以获得路径': function () { return schema.filters.name.$dpath.toString() === '<states>/filters/name'; }
             });
+            var name = schema.filters.name.$dpath.get(data, function (name, data) {
+                return data;
+            });
+            ASSERT({ '可根据路径获取数据': function () { return name === 'yi'; }
+            });
+        },
+        '通过代理来构建schema': function (ASSERT) {
+            var proxy = YA_core_1.Schema.proxy();
+            var displayName = proxy.filters.profile.displayName;
+            var schema = proxy.$schema;
+            ASSERT({
+                '通过代理可以构建数据架构': function () { return schema.filters.profile.displayName instanceof YA_core_1.Schema; },
+                '获取到的数据架构对象有正确的dpath': function () { return displayName.$dpath.toString() === 'filters/profile/displayName'; }
+            });
         }
     });
 });

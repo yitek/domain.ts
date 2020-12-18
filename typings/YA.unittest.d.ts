@@ -22,4 +22,4 @@ export declare class TestMethod implements TExecutable {
         [msg: string]: () => boolean;
     }) => any) => any, name?: string): TestMethod;
 }
-export declare function testable(desp: any, test?: any): number | ((target: any, name?: any) => number);
+export declare function testable(desp: any, test?: any): void | ((target: any, name?: any) => number);

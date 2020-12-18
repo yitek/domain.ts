@@ -833,7 +833,7 @@ var __decorate = (this && this.__decorate) || function (decorators, target, key,
                 Object.defineProperty(this, '$type', { enumerable: false, configurable: false, writable: false, value: ModelTypes.object });
             }
             var propSchema = new Schema_1(propDefaultValue, name, this, visitor);
-            Object.defineProperty(this, name, { configurable: false, writable: false, enumerable: true, value: propSchema });
+            Object.defineProperty(this, name, { configurable: true, writable: false, enumerable: true, value: propSchema });
             return propSchema;
         };
         Schema.prototype.$asArray = function (defaultItemValue, visitor) {
@@ -846,6 +846,11 @@ var __decorate = (this && this.__decorate) || function (decorators, target, key,
             Object.defineProperty(this, '$item', { configurable: false, writable: false, enumerable: false, value: itemSchema });
             return itemSchema;
         };
+        Schema.proxy = function (target) {
+            if (!target || !(target instanceof Schema_1))
+                return new Proxy(new Schema_1(target), schemaProxyTraps);
+            return new Proxy(target, schemaProxyTraps);
+        };
         var Schema_1;
         Schema = Schema_1 = __decorate([
             implicit()
@@ -853,6 +858,20 @@ var __decorate = (this && this.__decorate) || function (decorators, target, key,
         return Schema;
     }());
     exports.Schema = Schema;
+    var schemaProxyTraps = {
+        get: function (schema, propname) {
+            if (propname === '$schema')
+                return schema;
+            var existed = schema[propname];
+            if (existed)
+                return existed;
+            existed = schema.$defineProp(propname);
+            return new Proxy(existed, schemaProxyTraps);
+        },
+        set: function (target, propname, value) {
+            throw new Exception('schemaBuilder不可以在schemaBuilder上做赋值操作');
+        }
+    };
     var ModelSchema = /** @class */ (function () {
         function ModelSchema(defaultValue, name, superSchema, visitor) {
             var type;

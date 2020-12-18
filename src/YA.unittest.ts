@@ -251,13 +251,13 @@ export function testable(desp:any,test?){
         if(t==='function'){
             if(desp && (desp==='<class>' || desp.isClass)){
                 const tc = TestClass.fetch(test,desp.name)
-                if (meta(tc,desp)!==false) return todos.push(tc)
+                if (meta(tc,desp)!==false) return addTodos(tc)
             }
             const tm = TestMethod.fetch(test)
-            if(meta(tm,desp)!==false)  return todos.push(tm)
+            if(meta(tm,desp)!==false)  return addTodos(tm)
         }else if (t==='object'){
             const tc = TestClass.fetch(test)
-            if(meta(tc,desp)!==false) return todos.push(tc)
+            if(meta(tc,desp)!==false) return addTodos(tc)
         }throw '错误的参数'
     }
     
@@ -275,12 +275,24 @@ export function testable(desp:any,test?){
         meta(tm,desp)
     }
 }
-setTimeout(() => {
-    if(todos.length){
-        let executable:TExecutable
-        while(executable = todos.shift()) executable.execute(Logger.default)
+let tickTodo
+function addTodos(executable:TExecutable){
+    if (todos.length===0 && !tickTodo) {
+        tickTodo = setTimeout(() => {
+            if(todos.length){
+                try {
+                    let executable:TExecutable
+                    while(executable = todos.shift()) executable.execute(Logger.default)
+                } finally{
+                    clearTimeout(tickTodo)
+                    tickTodo=0
+                }
+                
+            }
+        }, 0);
     }
-}, 0);
+    todos.push(executable)
+}
 
 
 let tests=
