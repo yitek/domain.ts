@@ -382,7 +382,7 @@ export function nop(){}
 
 
 export class Exception extends Error{
-    constructor(msg,detail?:any){
+    constructor(msg,detail?:any,silence?){
         console.error(msg,detail);
         super(msg);
         if(detail)for(let n in detail) this[n] = detail[n];
@@ -451,6 +451,122 @@ export class Disposiable{
     }
 }
 disposable(Disposiable.prototype)
+
+//////////////////////////////////////////////////////////////
+// Subscribe/Publish
+
+export function subscribable(target){
+    Object.defineProperty(target,'$subscribe',{enumerable:false,configurable:false,writable:true,value:function(handler,extras?,disposer?){
+        let handlers = this['--subscribable--']
+        if(!handlers) Object.defineProperty(this,'--subscribable--',{enumerable:false,writable:false,configurable:true,value:handlers=[]})
+        if (handlers['--fulfill--']){
+            const filter = handlers['--fulfill-filter']
+            if(filter && !filter(extras)) return this
+            if(extras===undefined) extras = this
+            handlers['--fulfill-use-apply--']?handler.apply(extras,handlers['--fulfill-value--']):handler.call(extras,handlers['--fulfill-value--'])
+            return this
+        }
+        const callbacker = {
+            handler: handler,
+            extras: extras
+        }
+        handlers.push(callbacker)
+        if(disposer) {
+            if(disposer.$dispose){
+                disposer.$dispose(()=>this.$unsubscribe(handler))
+            }else if (disposer.dispose){
+                disposer.$dispose(()=>this.$unsubscribe(handler))
+            }else console.warn('subscribable.subscribe传入的第二个参数没有找到$dispose/dispose成员函数，无法追加释放事件')
+        } 
+        return this;
+    }})
+    Object.defineProperty(target,'$unsubscribe',{enumerable:false,configurable:false,writable:true,value:function(handler,filter?:(extras)=>boolean){
+        let handlers = this['--subscribable--']
+        if(!handlers || handlers['--fulfill--']) return this
+        for(let i =0,j=handlers.length;i<j;i++) {
+            const callbacker = handlers.shift()
+            if(!callbacker) return this
+            if(filter && filter(callbacker.extras)) continue
+            if(callbacker.handler!==handler) handlers.push(callbacker)
+        }
+        return this;
+    }})
+    Object.defineProperty(target,'$publish',{enumerable:false,configurable:true,writable:true,value:function(arg?:any,useApply?:boolean,filter?:(extras)=>boolean){
+        let handlers = this['--subscribable--']
+        if (!handlers) return this
+        if(handlers['--fulfill--']) throw new Exception('已经具有终值，不能再调用$publish')
+        for(let i =0,j=handlers.length;i<j;i++) {
+            const callbacker :any= (handlers as []).shift();
+            const extras = callbacker.extras
+            if (filter && !filter(extras)){
+                handlers.push(callbacker)
+            } else {
+                const self = extras===undefined?this:extras
+                let result
+                if (useApply) result = callbacker.handler.apply(self,arg)
+                else result = callbacker.handler.call(self, arg)
+                if (result!==observableRemoveToken) handlers.push(result)
+            }
+        }
+        return this
+    }})
+    Object.defineProperty(target,'$fulfill',{enumerable:false,configurable:true,writable:true,value:function(arg?:any,useApply?:boolean,filter?:(extras)=>boolean){
+        let handlers = this['--subscribable--']
+        if (handlers && handlers['--fulfill--']) {
+            throw new Exception('已经具有了终值，不可以再调用$fulfill函数')
+        }
+
+        const fulfill = {'--fulfill--':true,'--fulfill-value--':arg,'--fulfill-use-apply--':useApply,'--fulfill-filter--':filter}
+        Object.defineProperty(this,'--subscribable--',{configurable:false,writable:false,enumerable:false,value:fulfill})
+        if(!handlers || handlers.length===0) return this
+        for(let i =0,j=handlers.length;i<j;i++) {
+            const callbacker :any= (handlers as []).shift();
+            const extras = callbacker.extras
+            if (filter && !filter(extras)){continue}
+            const self = extras===undefined?this:extras
+            if (useApply) callbacker.handler.apply(self,arg)
+            else callbacker.handler.call(self, arg)
+        }
+        return this
+    }})
+}
+const observableRemoveToken = {}
+Object.defineProperty(subscribable,'REMOVE',{configurable:false,writable:false,enumerable:false,value:observableRemoveToken})
+
+export class Subscription{
+    $subscribe(handler:any,extra?,disposable?:Disposiable):any{throw 'abstract method'}
+    $unsubscribe(handler:any):any{throw 'abstract method'}
+    $publish(evt?:any,useApply?:boolean,filter?:(extras)=>boolean){throw 'abstract method'}
+    $fulfill(evt?:any,useApply?:boolean,filter?:(extras)=>boolean){throw 'abstract method'}
+    static isInstance(obj:any):boolean{
+        return (obj && obj.$subscribe && obj.$unsubscribe && obj.$publish && obj.$fulfill)
+    }
+}
+subscribable(Subscription.prototype)
+Object.defineProperty(Subscription,'REMOVE',{configurable:false,writable:false,enumerable:false,value:observableRemoveToken})
+
+export function eventable(target,name){
+    const privateName = '--event-' + name + '-handlers'
+    const fn = function(handler?,unsubscribe?:boolean):any{
+        if(typeof handler==='function'){
+            let handlers = this[privateName]
+            if(!handlers) {
+                if(unsubscribe) return this
+                Object.defineProperty(target,privateName,{configurable:false,writable:false,enumerable:false,value:handlers=[]})
+                
+            }else if(unsubscribe) {
+                array_remove(handlers,handler)
+                return this
+            }
+            handlers.push(handler)
+            return this
+        }
+
+    }
+    Object.defineProperty(fn,'--event',{enumerable:false,writable:false,configurable:false,value:true})
+    Object.defineProperty(target,name,{enumerable:false,configurable:true,writable:true,value:fn})
+}
+
 
 //////////////////////////////////////////////////////////////////
 // 对象创建与注入
@@ -662,8 +778,8 @@ export class Schema{
     $default?: any
     $fn?:Function
     $args?: Schema[]
-    $item?: ModelSchema
-    length?: ModelSchema
+    $item?: Schema
+    length?: Schema
     $dpath:DPath
     private '--dpath--'?: DPath
     constructor(defaultValue,name?:string|Schema[],superSchema?:any,visitor?:any){
@@ -763,1148 +879,8 @@ const schemaProxyTraps = {
         existed = schema.$defineProp(propname)
         return new Proxy(existed,schemaProxyTraps);
     },
-    set(target:ModelSchema,propname:string,value:any){
+    set(target:Schema,propname:string,value:any){
         throw new Exception('schemaBuilder不可以在schemaBuilder上做赋值操作');
     }
 };
-
-@implicit()
-export class ModelSchema {
-    $type: ModelTypes
-    $name?: string
-    $superSchema?: ModelSchema
-    $defaultValue?: any
-    $dependenceSchemas?:ModelSchema[]
-    $itemSchema?: ModelSchema
-    length?: ModelSchema
-    private '--root'?:ModelSchema
-    private '--paths'?:string[]
-    constructor(defaultValue?:any,name?: string |ModelSchema[],superSchema?: any,visitor?:{handler:(schema:ModelSchema,parent)=>any,parent:any}){
-        let type :ModelTypes
-        let deps :ModelSchema[]
-        if(superSchema==='constant'){
-            type = ModelTypes.constant
-        }else if(superSchema==='computed'){
-            type = ModelTypes.computed
-            deps = name as ModelSchema[]
-            superSchema = undefined
-        } else if(typeof defaultValue==='object'){
-            if(is_array(defaultValue)) type = ModelTypes.array
-            else type = ModelTypes.object
-        }
-        else type = ModelTypes.value
-        implicit(this,{
-            '$type': type,
-            '$name': name,
-            '$dependenceSchemas':deps,
-            '$superSchema': superSchema,
-            '$defaultValue':defaultValue,
-            '$itemSchema':undefined,
-            'length':undefined
-        });
-        if(!defaultValue  || type===ModelTypes.constant || typeof defaultValue!=='object') {
-            if(visitor)visitor.handler(this,visitor.parent)
-            return
-        }
-        
-        if(type=== ModelTypes.array){
-            this.$asArray(clone(defaultValue[0]))
-        } else if(type===ModelTypes.object) {
-            for(let n in defaultValue) this.$prop(n,clone(defaultValue[n]))
-        } 
-    }
-    
-    $prop(name:string, defaultValue?:any): ModelSchema{
-        if(this.$type === ModelTypes.array) throw new Exception('已经定义为array了',{'schema':this})
-        this.$type = ModelTypes.object
-        return this[name] || (this[name] = new ModelSchema(defaultValue,name,this))
-    }
-    $asArray(defaultItemValue?: any,context?:any):ModelSchema{
-        if(this.$type !== ModelTypes.value) throw new Exception('已经定义为array/object了',{'schema':this})
-        this.$type = ModelTypes.array
-        let lengthSchema = new ModelSchema(0,'length',this)
-        Object.defineProperty(this,'length',{enumerable:false,configurable:false,writable:false,value:lengthSchema})
-        const itemSchema = new ModelSchema(defaultItemValue,null,this)
-        this.$itemSchema = itemSchema
-        return itemSchema
-    }
-    $dataPath(){
-        let dpath :DPath = this['--data-path']
-        if(!dpath) dpath = buildSchemaInfo.call(this).dataPath
-        return dpath
-    }
-    $paths(){
-        let paths:string[] = this['--paths']
-        if(!paths) paths = buildSchemaInfo.call(this).paths
-        return paths
-    }
-    $root(){
-        let root:ModelSchema = this['--root']
-        if(!root) root = buildSchemaInfo.call(this).root
-        return root
-    }
-
-    static createBuilder(target:ModelSchema){
-        if(!target || target instanceof ModelSchema) return new Proxy(new ModelSchema(),memberStatesTraps)
-        return new Proxy(target,rootStatesTraps);
-    }
-
-    static constant:ModelSchema = new ModelSchema(None,'<CONSTANT>','constant')
-
-}
-function buildSchemaInfo(){
-    let schema:ModelSchema = this
-    let paths:string[] =[]
-    let root :ModelSchema
-    while(schema){
-        root = schema
-        paths.unshift(schema.$name)
-        schema = schema.$superSchema
-    }
-    const pathtext = paths.join('/')
-    const dpath = DPath.fetch(pathtext)
-    constant(false, this,'--paths',paths)
-    constant(false, this, '--root',root)
-    constant(false,this,'--data-path',dpath)
-    return {paths,root, dataPath:dpath}
-}
-
-const rootStatesTraps = {
-    get(target: {inst:any,schema:ModelSchema},propname:string){
-        if(!target.inst) return target.inst[propname]
-        if(propname[0]==='$') {
-            if(propname==='$schema') return target.schema;
-            return target[propname];
-        }
-        return new Proxy(target.schema.$prop(propname),memberStatesTraps);
-    },
-    set(target:{inst:any,schema:ModelSchema},propname:string,value:any){
-        if(!target.inst) {
-            target.inst[propname] = value
-            return
-        } 
-        throw new Exception('schemaBuilder不可以在schemaBuilder上做赋值操作');
-    }
-};
-const memberStatesTraps = {
-    get(schema: ModelSchema,propname:string){
-        if(propname[0]==='$') {
-            if(propname==='$schema') return schema;
-            return schema[propname];
-        }
-        return new Proxy(schema.$prop(propname),memberStatesTraps);
-    },
-    set(target:ModelSchema,propname:string,value:any){
-        throw new Exception('schemaBuilder不可以在schemaBuilder上做赋值操作');
-    }
-};
-
-
-//////////////////////////////////////////////////////////////
-// Subscribe/Publish
-
-
-export function eventable(target,name){
-    const privateName = '--event-' + name + '-handlers'
-    const fn = function(handler?,unsubscribe?:boolean):any{
-        if(typeof handler==='function'){
-            let handlers = this[privateName]
-            if(!handlers) {
-                if(unsubscribe) return this
-                Object.defineProperty(target,privateName,{configurable:false,writable:false,enumerable:false,value:handlers=[]})
-                
-            }else if(unsubscribe) {
-                array_remove(handlers,handler)
-                return this
-            }
-            handlers.push(handler)
-            return this
-        }
-
-    }
-    Object.defineProperty(fn,'--event',{enumerable:false,writable:false,configurable:false,value:true})
-    Object.defineProperty(target,name,{enumerable:false,configurable:true,writable:true,value:fn})
-}
-
-export function subscribable(target){
-    Object.defineProperty(target,'$subscribe',{enumerable:false,configurable:true,writable:true,value:function(handler,disposer?){
-        let handlers = this['--ob-handlers']
-        if(!handlers) Object.defineProperty(this,'--ob-handlers',{enumerable:false,writable:false,configurable:false,value:handlers=[]})
-        handlers.push(handler)
-        if(disposer) disposer.dispose(()=>{
-            array_remove(handlers,handler)
-        })
-        return this;
-    }})
-    Object.defineProperty(target,'$unsubscribe',{enumerable:false,configurable:true,writable:true,value:function(handler){
-        let handlers = this['--ob-handlers']
-        if(!handlers) return this
-        array_remove(handlers,handler)
-        return this;
-    }})
-    Object.defineProperty(target,'$publish',{enumerable:false,configurable:true,writable:true,value:function(arg?:any,useApply?:boolean){
-        let handlers = this['--ob-handlers']
-        if(!handlers) return this
-        if(useApply) for(let i in handlers) handlers[i].apply(this,arg)
-        else for(let i in handlers) handlers[i].call(this,arg)
-        return this
-    }})
-}
-
-export class Subscription{
-    $subscribe(handler:any,disposable:Disposiable):any{throw 'abstract method'}
-    $unsubscribe(handler:any):any{throw 'abstract method'}
-    $publish(evt?:any,useApply?:boolean){throw 'abstract method'}
-    static isInstance(obj:any):boolean{
-        return (obj && obj.$subscribe && obj.$unsubscribe && obj.$publish)
-    }
-}
-subscribable(Subscription.prototype)
-
-
-
-
-////////////////////////////////////
-// createElement
-
-export type TNodeDescriptor = {
-    tag?: string;
-    content?: string| ModelSchema | TObservable;
-    component?: any;
-    attrs?: {[name:string]:any};
-    children?: TNodeDescriptor[];
-}
-
-///////////////////////////////////////
-// observable
-
-
-export type TObservableEvent = {
-    value?:any
-    old?:any
-    src?:any
-    sender?:Observable
-    removed?:boolean
-    cancel?:boolean
-    stop?:boolean
-}
-/*
-export function observable(initial:any,name?:string,owner?:TObservable){
-    if(owner){
-        let facade = owner[name]
-        if(facade) return facade(initial)
-        let ownerOb = owner(Observable)
-        let ob = new Observable(initial,undefined,ownerOb,name)
-        Object.defineProperty(owner,name,{enumerable:true,configurable:false,writable:false,value:ob.$observable})
-        return ob.$observable
-    }else {
-        if(initial instanceof Schema) return new Observable(undefined,initial).$observable
-        return new Observable(initial).$observable
-    }
-}*/
-
-export type TObservable = {
-    [index in number | string]: TObservable
-} & {
-    (value?: any,disposor?:any,capture?:boolean): any
-    '$Observable':Observable
-}
-
-
-@implicit()
-export class Observable{
-    type:ModelTypes
-    name:string
-    old:any
-    value:any
-    schema: ModelSchema
-    super?:Observable
-    deps?:Observable[]
-    dep_handler?:(evt:TObservableEvent)=>any
-    $observable:TObservable
-    listeners?:{(evt:TObservableEvent):any}[]
-    captures?:{(evt:TObservableEvent):any}[]
-    hasChanges?:boolean
-    length?:Observable
-    constructor(initial:any,schema?:ModelSchema,name?:string,superOb?:Observable|string){
-        let facade;
-        facade = (value?:any,isSubscriber?:any,capture?:boolean):any=>{
-            if(value===undefined) {
-                return this.value===Observable?this.old:this.value
-            }else if(value===Observable) return this
-            else if(value===ModelSchema) return this.schema
-            if(isSubscriber!==undefined){
-                if(this.type!==ModelTypes.constant){
-                    if(isSubscriber){
-                        if(capture) this.capture(value,isSubscriber)
-                        else this.subscribe(value,isSubscriber)
-                    } else if(isSubscriber===false){
-                        if(capture) this.uncapture(value)
-                        else this.unsubscribe(value)
-                    } else throw new Exception('不正确的参数,isSubscriber不能为空字符串等空值')
-                }
-                return facade
-            }
-            if(value){
-                if(value instanceof ModelSchema) throw new Exception('不能够将Schema赋值给observable')
-                if(this.schema.$type=== ModelTypes.constant || this.schema.$type===ModelTypes.computed) return facade
-                if(value['$Observable']) value = value()
-                else if(value.$observable) value = value.get()
-            }
-            this.set(value)
-            return facade
-        }
-        this.$observable = facade as any
-        Object.defineProperty(facade,'$Observable',{enumerable:false,configurable:false,writable:false,value:this})
-        
-        
-        this.name = name || schema.$name
-        if(superOb === 'constant' || schema?.$type===ModelTypes.constant){
-            this.type = ModelTypes.constant
-            return
-        }
-        if(superOb === 'computed' || schema?.$type===ModelTypes.computed){
-            this.type = ModelTypes.computed
-            return
-        }
-        schema = this.schema = (schema as ModelSchema) || new ModelSchema(initial,name)
-        this.type = schema.$type
-        if(this.type===ModelTypes.object){
-            initObservableObject.call(this, facade, initial, schema)            
-        }else if(this.type === ModelTypes.array){
-            initObservableArray.call(this, facade, initial, schema)
-        }else if(this.type=== ModelTypes.constant){
-            this.get = ()=>schema.$defaultValue
-            this.update = this.set = this.subscribe = this.unsubscribe = this.capture = this.uncapture = ()=>this
-        } else if(this.type===ModelTypes.computed){
-            initObservableComputed.call(this, facade, initial, schema)
-        }else{
-            this.old = initial===undefined?schema.$defaultValue:initial
-        }
-        this.value = Observable
-    }
-
-    get(){
-        return this.value===Observable?this.old:this.value
-    }
-    set(value:any):Observable{
-        this.value = value
-        return this
-    }
-    defineProp(name:string,initial?:any):Observable{
-        if(this.type===ModelTypes.value){
-            initObservableObject.call(this,this.$observable,{})
-        }else if(this.type ===ModelTypes.array) throw new Exception('数组不能定义成员')
-        else if(this.$observable[name]) throw new Exception('已经有该成员')
-        const result = new Observable(initial,undefined,name,this)
-        Object.defineProperty(this.$observable,name,{enumerable:true,configurable:false,writable:false,value: result})
-        return result
-    }
-    subscribe(handler: (evt:TObservableEvent)=>any, disposer?:any):Observable{
-        const handlers = this.listeners || (this.listeners=[])
-        handlers.push(handler)
-        if(disposer) disposer.dispose(()=>{
-            array_remove(handlers,handler)
-        })
-        return this;
-    }
-
-    unsubscribe(handler: (evt:TObservableEvent)=>any):Observable{
-        const handlers = this.listeners
-        array_remove(handlers,handler)
-        return this
-    }
-
-    capture(handler: (evt:TObservableEvent)=>any, disposer?:any):Observable{
-        const handlers = this.captures || (this.captures=[])
-        handlers.push(handler)
-        if(disposer) disposer.dispose(()=>{
-            array_remove(handlers,handler)
-        })
-        return this;
-    }
-
-    uncapture(handler: (evt:TObservableEvent)=>any):Observable{
-        const handlers = this.captures
-        array_remove(handlers,handler)
-        return this
-    }
-
-    update(src?:any,removed?:boolean):Observable{
-        const evt:TObservableEvent = {removed:removed,src:src}
-        const changed = update.call(this,evt)
-        if(changed && !evt.cancel) bubble.call(this,evt)
-        return this
-    }
-}
-
-function update(evt?:TObservableEvent):boolean{
-    let value = this.value === Observable? this.old: this.value    
-    if(this.value===Observable || this.value===this.old) return false;
-    if(!evt) evt = {}
-    evt.value = value;evt.old = this.old;evt.sender = this
-    this.old = value
-    this.value = Observable
-    let handlers = this.listeners
-    if(handlers)for(let i = 0,j=handlers.length;i<j;i++){
-        handlers[i].call(this,evt)
-    }
-    return true
-}
-
-function bubble(evt:TObservableEvent){
-    let owner = this.super
-    while(owner && !(evt as any).cancel){
-        let handlers = owner.captures;
-        if(handlers){
-            for(let i = 0,j=handlers.length;i<j;i++){
-                handlers[i].call(this,evt)
-            }
-        }
-        owner = owner.super
-    }
-}
-
-function initObservableObject(facade:TObservable,initial:any,schema:ModelSchema){
-    this.set = (value:any): Observable=>{
-        if(!value) value={}
-        let facade = this.facade;
-        for(let name in facade){
-            facade[name](value[name])
-        }
-        this.value = value
-        return this
-    }
-    this.update = (src?:any,removed?:boolean)=>{
-        const evt:TObservableEvent = {removed:removed,src:src}
-        const changed = removed || update.call(this,evt)
-        if(changed && !evt.cancel) bubble.call(this,evt)
-        if(evt.stop) return this
-        let facade = this.facade
-        for(let n in facade){ 
-            facade[n](Observable).update(evt)
-        }
-        return this
-    }
-    this.old = initial || {}
-    for(let name in schema) {
-        let member = new Observable(this.old[name],schema[name],this,name)
-        Object.defineProperty(facade,name, {enumerable:true,configurable:false,writable:false,value:member.$observable})
-    }
-
-}
-function initObservableArray(facade:TObservable,initial:any,schema:ModelSchema){
-    this.set = (value)=>{
-        if(!value) value=[]
-        let facade = this.$observable
-        for(let i =0,j=value.length;i<j;i++){
-            let name = i.toString()
-            let item = facade[name]
-            if(item) {item(value[i]);continue;}
-            item = new Observable(value[i],this.$schema.$item,this,name)
-            Object.defineProperty(facade,name,{configurable:true,writable:false,enumerable:true,value:item.facade })
-        }
-        this.value = value
-        this.length.set(value.length)
-        return this
-    }
-    this.update = (src:any,removed?:boolean)=>{
-        const evt:TObservableEvent = {removed:removed,src:src}
-        let changed = update.call(this,evt)
-        let oldLength = this.length.old
-        let lenChanged = update.call(this.length,evt)
-
-        if((changed || lenChanged) && !evt.cancel) bubble.call(this,evt)
-        if(evt.stop) return this
-
-        let facade = this.$observable
-        for (let i= 0, j= evt.value.length; i<j; i++){
-            let item = facade[i](Observable)
-            item.update(evt)
-        }
-        for(let i = evt.value.length,j=oldLength;i<j;i++){
-            const n = i.toString()
-            let removedItem:Observable = facade[n](Observable)
-            removedItem.update(evt,true)
-            delete facade[n]
-        }
-        return this
-    }
-    let lengthSchema = schema.length
-    let lengthObservable = new Observable(this.old.length,lengthSchema,this,'length')
-    Object.defineProperty(facade,'length', {enumerable:false,configurable:false,writable:false,value:lengthObservable.$observable})
-
-    this.old = initial || []
-    
-    if(initial)for(let i = 0,j=initial.length;i<j;i++){
-        let name = i.toString()
-        let itemObservable = new Observable(initial[i],this.schema.$itemSchema,this,name)
-        Object.defineProperty(facade,name, {enumerable:false,configurable:true,writable:false,value:itemObservable.$observable})
-    }
-}
-function initObservableComputed(facade:TObservable,initial:any,schema:ModelSchema){
-    this.get = ()=>{
-        if(this.value!==Observable) return this.value
-        const args = []
-        for(const i in this.deps){
-            const value = this.deps[i].get()
-            args.push(value)
-        }
-        return schema.$defaultValue.apply(this,args)
-    }
-    this.set= this.capture = this.uncapture = this.update = ()=>this
-    this.subscribe = (handler: (evt:TObservableEvent)=>any, disposer?:any):Observable=>{
-        if(!this.dep_handler){
-            const callback = this.dep_handler = (src:TObservable)=>{
-                const handlers = this.handlers
-                if(!handlers || handlers.length===0){
-                    for(const i in this.deps){
-                        this.deps[i].unsubscribe(this.dep_handler)
-                    }
-                    this.dep_handler = undefined
-                    return
-                }
-                const old = this.value ===Observable?undefined:this.value
-                this.value = Observable
-                const value = this.get()
-                if(old===value) return
-                const evt:TObservableEvent = {
-                    value:value,old :old,sender : this,src:src
-                }
-                for(const i in handlers) handlers[i].call(this,evt)                
-            }
-            for(const i in this.deps){
-                this.deps[i].subscribe(callback,disposer)
-            }
-        }
-        Observable.prototype.subscribe.call(handler,disposer)  
-        return this;
-    }
-    this.deps = initial
-}
-//////////////////////////////
-// meta
-// 控件元数据
-// 所有控件都有
-export type TComponent = any
-
-export class Meta{
-    tagName?:string
-    resolved?:boolean
-    activator:Activator
-    scopeSchema?:ModelSchema
-    modelSchema?:ModelSchema
-    properties?:{[name:string]:DPath & {handlername?:string}}
-    vnode?:TNodeDescriptor
-    
-    constructor(fn:Function){
-        const scopeSchema = this.scopeSchema = new ModelSchema()
-        const modelSchema = this.modelSchema = new ModelSchema(undefined,Meta.modelname)
-        const modelSchemaProxy = ModelSchema.createBuilder(modelSchema)
-        const scopeSchemaProxy = ModelSchema.createBuilder(scopeSchema)
-        const self = fn.prototype
-        let renderer :(model:any,injectScope:InjectScope)=>TNodeDescriptor = (fn as any).render || fn.prototype.render
-        let vnode :TNodeDescriptor
-        if(renderer){
-            if(typeof renderer!=='function')
-                vnode = Meta.parseTemplateText(renderer as any,self,modelSchemaProxy,scopeSchemaProxy) 
-            else 
-                vnode = renderer.call(self,modelSchemaProxy,scopeSchemaProxy)
-        }
-        if(!fn.prototype.render){
-            let ctor = function(){
-                fn.call(this['--'].model)
-            } as any
-            ctor.prototype = fn.prototype
-            this.activator = Activator.fetch(ctor)
-            this.activator.ctorArgs=[]
-        }else this.activator =Activator.fetch(fn)
-        
-        this.vnode = vnode
-        return this
-    }
-    tag(name:string):Meta{
-        if(this.tagName) throw new Exception('重复指定控件的标签',{name:name});
-        if(Meta.components[name]) throw new Exception('已经注册了该标签的控件',{existed:Meta.components[name]})
-        this.tagName = name
-        Meta.components[name] = this as any;
-        return this
-    }
-    props(names:{[n:string]:string}):Meta{
-        
-        if(!this.properties){
-            this.properties = {}
-        }
-        for(const n in names) {
-            const name = trim(n)
-            const path = trim(names[n])
-            if(name && path){
-                let dpath:any = this.properties[name] = new DPath(path)
-                dpath.handlername = '@' + name
-            }
-        }
-        return this
-    }
-    
-    static parseTemplateText : (text:string,self:any,model:any,scope:any)=>TNodeDescriptor
-    static components :{[name:string]:Meta} = {}
-    static modelname:string = '--model--'
-}
-
-export function component(tag?:any,fn?:any):any{
-    if(tag){
-        if(typeof tag==='function') {
-            fn=tag;tag = undefined
-        }
-    }
-    if(fn){
-        const meta = new Meta(fn)
-        if(tag) meta.tag(tag)
-    }
-    
-    return function(target){
-        const meta = new Meta(target)
-        if(tag) meta.tag(tag)
-    }
-}
-
-/////////////////////////////////////////////////
-// runtime
-
-export type TBindScope = {
-    $superScope:TBindScope
-    $fetch(name:string):TObservable
-    $resolve(bindValue:any,expandOb?:boolean):any
-    $createScope(name?:string,schema?:ModelSchema) 
-} & TObservable
-export class BindScope extends Observable{
-    constructor(schema:ModelSchema,name:string,superScope:BindScope,model:TObservable){
-        super({},schema,undefined,name)
-        Object.defineProperty(this.$observable,'$superScope',{enumerable:false,configurable:false,writable:false,value:superScope.$observable})
-        Object.defineProperty(this.$observable,Meta.modelname,{enumerable:false,configurable:false,writable:false,value:model})
-        Object.defineProperty(this.$observable,'$createScope',{enumerable:false,configurable:false,writable:false,value:function(name:string){
-            return new BindScope(null,name,this,this[Meta.modelname]).$observable
-        }})
-        Object.defineProperty(this.$observable,'$resolve',{enumerable:false,configurable:false,writable:false,value:bindScopeResolve})
-    }
-    //name?:string|{[name:string]:T},inital?:{[name:string]:T}
-    $createScope(name?:string,schema?:any):BindScope{
-        return new BindScope(schema,name,this,this[Meta.modelname]) as any
-    }
-    
-}
-function bindScopeResolve(bindValue:any,expandOb?:boolean):TObservable{
-    if(expandOb===undefined){
-        let scope :TBindScope = this
-        while(scope){
-            const ob = scope[bindValue]
-            if(ob) return ob
-            scope = scope.$superScope
-        }
-        return undefined
-    }
-    if(bindValue instanceof ModelSchema ){
-        if(bindValue.$type===ModelTypes.constant){
-            return new Observable(undefined,bindValue,undefined,'<CONSTANT>').$observable
-        }else if (bindValue.$type === ModelTypes.computed) {
-            return new Observable(undefined,bindValue,undefined,'<COMPUTED>').$observable
-        }
-        const paths = bindValue.$paths()
-        const varname = paths[0]
-        const observable = this.$fetch(varname)
-        let result:TObservable = observable
-        for(let i =1,j=paths.length;i<j;i++) result = result[paths[i]]
-        bindValue = result
-    }
-    if(expandOb===false) {
-        return bindValue && bindValue.$observable ? bindValue.$observable: new Observable(bindValue,undefined,undefined,'<constant>')
-    }
-    if(expandOb===true) return extractObserable(bindValue)
-    return bindValue
-}
-function extractObserable(bindValue){
-    if(!bindValue) return bindValue
-    if(bindValue.$Observable) return bindValue.$Observable.get()
-    if(bindValue.$observable) return bindValue.get()
-    if(typeof bindValue==='object'){
-        const ret = is_array(bindValue)?[]:{}
-        for(const n in bindValue){
-            ret[n] = extractObserable(bindValue[n])
-        }
-        return ret
-    }
-    return bindValue
-}
-
-export class ComponentRuntime{
-    instance:TComponent
-    elements:any[]
-    model:Observable
-    children:ComponentRuntime[]
-    services:InjectScope
-    scope:BindScope
-    slots:{[name:string]:TNodeDescriptor[]}
-    sid:string
-    constructor(public opts:TNodeDescriptor,public meta:Meta,public parent?:ComponentRuntime){
-        const tag = this.meta.tagName || (this.meta.tagName=rid('Component#'))
-        this.sid = rid(`<${tag}>#`)
-        if(parent){
-            this.services = parent.services.createScope() as InjectScope
-        }else this.services = InjectScope.global
-        
-        
-        this.slots={}
-        if(opts.children){
-            for(const i in opts.children) {
-                const child = opts.children[i]
-                let slotname:string
-                if(child.attrs){
-                    slotname = child.attrs['slot']
-                    if(slotname===undefined) slotname=''
-                    let slotNodes = this.slots[slotname]
-                    if(!slotNodes) slotNodes = this.slots[slotname] = []
-                    slotNodes.push(child)
-                }
-            }
-        }
-        
-
-        this.instance = this.meta.activator.createInstance(this.services)
-    }
-    initialize(bindContext:TBindContext){
-        this.scope = bindContext.scope.$createScope(this.sid,this.meta.scopeSchema)
-        this.model = new Observable(undefined,this.meta.modelSchema,Meta.modelname,undefined)
-        this.model.value = this.model.old
-        Object.defineProperty(this.scope,Meta.modelname,{enumerable:false,writable:false,configurable:false,value:this.model})
-        if(typeof this.instance.created==='function') this.instance.created(this.model.value,this.services)
-    }
-    render(bindContext:TBindContext):any[]{
-        let rs = []
-        
-
-        return rs
-    }
-
-}
-export class PropertyBinding{
-    observable:TObservable
-    handler:Function
-    constructor(bindValue){
-
-    }
-}
-export type TBindContext = {
-    component:ComponentRuntime
-    scope:TBindScope
-    options:any
-}
-function bindComponentAttr(component:ComponentRuntime,scope:TBindScope,bindContext:TBindContext){
-    const opts = bindContext.options.$attrs || bindContext.options
-    for(const bindName in opts)((bindName:string,bindValue,scope:TBindScope,component:ComponentRuntime)=>{
-        const ob:TObservable = scope.$resolve(bindValue,false)
-        component.instance[bindName] = ob() 
-        const propInfo = component.meta.properties[bindName]
-        ob((evt:TObservableEvent)=>{
-            component.instance[bindName] = evt.value
-            if(propInfo){
-                const modelOb = propInfo.get(component.model)
-                modelOb(evt.value)
-            }
-        },component,true)
-        // <input border="1" value={state.data} />
-    })(bindName,opts[bindName],bindContext.scope,bindContext.component)  
-}
-
-// class ComponentRuntimeInfo{
-//     meta:TMeta
-//     instance:TComponent
-//     node:TNode
-//     model:TObservable
-//     scope: Scope
-//     parent:ComponentRuntimeInfo
-//     children:ComponentRuntimeInfo[]
-//     mounted:boolean
-//     disposed:boolean
-//     constructor(meta:TMeta,opts:any,parent?:ComponentRuntimeInfo){
-//         this.meta = meta
-//         const component:TComponent = this.instance = activate(meta.ctor,true)
-//         constant(false,component,'--',this)
-        
-//         if(meta.props && opts)for(let i in meta.props) {let n = meta.props[i];component[n]=opts[n];}
-//         const model = this.model = new Observable(component,meta.modelSchema,undefined,'this').--facade
-//         this.scope = new Scope(model,meta.tag)
-//         if(typeof component.created==='function') component.created()
-//         if(parent) parent.appendChild(this)
-        
-//     }
-//     render(){
-//         return render({scope:this.scope,component:this.instance,descriptor:this.meta.vnode})
-//     }
-//     appendChild(child:ComponentRuntimeInfo){
-//         if(child.parent) throw new Exception('该component已经有父级,不可以再指定父级',child)
-//         child.parent = this
-//         const node = child.render()
-//         platform.appendChild(this.node,node)
-//         const parentRTInfo = parent['--'] as ComponentRuntimeInfo
-//         const children = parentRTInfo.children || (parentRTInfo.children=[])
-//         children.push(this)
-//         if(this.mounted){
-//             if(typeof child.instance.mounted){
-//                 child.instance.mounted()
-//             }
-//         }
-//         return this
-//     }
-//     mount(container:TNode):TComponent{
-//         if(this.mounted) throw new Exception('不可以重复挂载',this)
-//         if(this.parent) throw new Exception('不可以只能挂载根组件，该组件已经有父组件',this)
-//         const node = this.render()
-//         platform.mount(container,node)
-//         function mount(info:ComponentRuntimeInfo){
-//             info.mounted=true
-//             if(typeof info.instance.mounted==='function'){
-//                 info.instance.mounted()
-//             }
-//             if(info.children) for(let i in info.children) mount(info.children[i])
-//         }
-//         mount(this)
-//         return this.instance
-//     }
-//     dispose(){
-//         if(typeof this.instance.dispose==='function'){
-//             try{
-//                 this.instance.dispose()
-//             }catch(ex){
-//                 console.error("dispose错误",ex)
-//             }
-//         }
-//         if(this.dispose)for(let i in this.children) this.children[i].dispose()
-//         this.disposed=true
-//     }
-// }
-
-// class Runtime{
-//     roots:ComponentRuntimeInfo[]
-//     timer:number
-//     tick :number = 50
-//     constructor(){
-//         this.roots=[]
-//     }
-//     mount(container:TNode,renderer,opts?:any){
-//         if(!renderer) return
-//         let meta:TMeta = renderer['--meta']
-//         if(!meta) meta = resolveMeta(renderer)
-//         const rtInfo = new ComponentRuntimeInfo(meta,opts)
-//         this._addRoot(rtInfo)
-//         return rtInfo
-//     }
-//     private _addRoot(root:ComponentRuntimeInfo){
-//         if(root.parent) throw new Exception('不是顶级控件，不可以挂载',root)
-//         this.roots.push(root)
-//         if(!this.timer){
-//             this.timer = setTimeout(()=>{},this.tick)
-//         }
-//     }
-//     private _tick(){
-//         for(let i =0,j=this.roots.length;i<j;i++){
-//             let rtInfo = this.roots.shift()
-//             if(!rtInfo.disposed){
-//                 if(!platform.alive(rtInfo.node)){
-//                     rtInfo.dispose()
-//                     continue
-//                 }
-//                 rtInfo.model(Observable).update(false,this as any);
-//                 this.roots.push(rtInfo)
-//             }
-//         }
-//         if(this.roots.length) this.timer = setTimeout(()=>this._tick(),this.tick)
-//         else this.timer = 0
-//     }
-    
-// }
-
-// export let runtime:Runtime = new Runtime()
-
-// export function mount(container:TNode,opts:any,extra?:any){
-//     let t = typeof opts
-//     if(t==='function'){
-//         const meta = resolveMeta(opts)
-//         const rt = new ComponentRuntimeInfo(meta,opts)
-//         debugger
-//         return rt.mount(container)
-//     }
-//     throw "not implement"
-// }
-
-
-
-// let tempCreateElementFn
-// function _createElement(tag:string,attrs:{[name:string]:any}):TNodeDescriptor{
-//     if(tempCreateElementFn) return tempCreateElementFn.apply(this,arguments)
-//     const vnode:TNodeDescriptor = {
-//         tag:tag,attrs:attrs
-//     }
-//     if(arguments.length>2){
-//         let children = [];
-//         for(let i =2,j=arguments.length;i<j;i++){
-//             let child = arguments[i]
-//             if(child) children.push(child)
-//         }
-//         if(children.length) vnode.children = children
-//     }
-
-//     return vnode;
-// }
-
-// export const createElement :(tag:string,attrs:{[index:string]:any},...args:any[])=>TNodeDescriptor = _createElement;
-
-// //////////////////
-// // render
-
-
-// type TRenderContext = {
-//     descriptor:TNodeDescriptor,scope:any,component:TComponent
-// }
-
-// export function render(context:TRenderContext) {
-//     const descriptor = context.descriptor
-//     if(descriptor.attrs) {
-//         for(let n in specialAttributeRenders) {
-//             let opts = descriptor.attrs[n]
-//             if(opts!==undefined) return specialAttributeRenders[n](n,opts,context)
-//         }
-//     }
-//     if(descriptor.content!==undefined){
-//         return renderText(descriptor.content,context)
-//     } 
-//     let componentType = descriptor.component || metas[descriptor.tag]
-//     if(componentType){
-
-//     }else{
-//         if(descriptor.tag) return renderNode(descriptor.tag,context)
-//         return renderText(descriptor.content,context)
-//     }
-// }
-
-// function renderText(content:any,context:TRenderContext):TNode{
-//     const {value,observable} = resolveBindValue(content,context)
-//     debugger
-//     const node = platform.createText(value)
-//     if(observable) observable((evt)=>{
-//         node.nodeValue = evt.value
-//     },context.component)
-//     return node
-// }
-
-// function renderNode(tag:string,context:TRenderContext):TNode{
-//     debugger
-//     const {descriptor} = context
-//     const node = platform.createElement(tag)
-//     const attrs = descriptor.attrs
-//     if(attrs) for(let attrName in attrs){
-//         let {value,observable}= resolveBindValue(attrs[attrName],context)
-//         let attrBinder = nodeAttributeBinders[attrName]
-//         if(attrBinder){
-//             attrBinder(node,attrName,value,observable,context)
-//         } 
-//         else {
-//             platform.setAttribute(node,attrName,value);
-//             if(observable)((attrName,node,platform,component)=>{
-//                 observable?.subscribe((evt)=>{
-//                     platform.setAttribute(node,attrName,evt.value)
-//                 },component)
-//             })(attrName,node,platform,context.component)
-            
-//         }
-//     }
-//     if(descriptor.children){
-//         for(let i = 0,j=descriptor.children.length;i<j;i++){
-//             let childNode = render({scope:context.scope,component:context.component,descriptor:descriptor.children[i]})
-//             if(childNode===undefined) debugger
-//             platform.appendChild(node, childNode)
-//         }
-//     }
-//     return node
-// }
-
-
-// const nodeAttributeBinders :{[attrname:string]:(node:TNode,attrName:string,attrValue:any,attrObservable:TObservable,context:TRenderContext)=>void} = {}
-
-// function nodeEventBinder(node:TNode,attrName:string,attrValue:any,attrObservable:TObservable,context:TRenderContext){
-//     let evtName = attrName.substr(2)
-//     let component = context.component
-//     platform.attach(node,evtName,getListener(attrValue,component))
-//     if(attrObservable)attrObservable((evt)=>{
-//         if (evt.old) {
-//             let listener = evt.old['--listener'] || evt.old
-//             platform.detech(node,evtName,listener)
-//         } 
-//         platform.attach(node,evtName,getListener(evt.value,component))
-        
-//     },context.component)
-// }
-// constant(false,nodeEventBinder,'--event-binder',true)
-// const evtnames = ['onclick','ondblclick','onsubmit','onfocus','onblur','onmouseenter','onmouseout','onmouseover','onmousemove','onmousedown','onmouseup','onkeypress','onkeydown','onkeyup','onchange','onload','onresize']
-// for(let i in evtnames)nodeAttributeBinders[evtnames[i]] =  nodeEventBinder
-
-// function getListener(fn:Function,component:TComponent){
-//     let listener = fn['--listener']
-//     if(listener) return listener
-//     if(!component) return fn
-//     listener = function(evt){return fn.call(component,evt,component)}
-//     constant(false,fn ,'--listener',listener)
-//     return listener
-// }
-
-// const specialAttributeRenders:{[attrname:string]:(attrName:string,attrValue:any,context:TRenderContext)=>TNode}={}
-
-
-// specialAttributeRenders['y-for'] =(attrName:string,attrValue:any,context:TRenderContext):TNode =>{
-//     const asSchema = attrValue.as
-//     let {value,observable} = resolveBindValue.call(attrValue.each,context.scope,context);
-//     let exists = []
-//     makeFor(attrName,asSchema,value,observable,exists,context)
-//     constant(false,observable,'--each-elements',exists)
-//     if(observable)observable.subscribe((evt)=>{
-//         makeFor(attrName,asSchema,evt.value,evt.sender,exists,context)
-//         evt.cancel=true
-//     },context.component)
-// }
-
-// function makeFor(attrName:string,asSchema:ModelSchema,eachValue:any,eachObservable:Observable,exists:TNode[],context:TRenderContext){
-//     const {descriptor,scope} = context
-//     let tmp = descriptor.attrs['y-for']
-//     descriptor.attrs[attrName] = null
-//     for(let i=0,j=eachValue.length;i<j;i++) {
-//         let existed = exists.shift()
-//         if(existed){
-//             existed['--loop-variable'].setValue(eachValue[i])
-//             exists.push(existed)
-//         }else {
-//             let loopScope = scope.$createScope(i.toString())
-//             let loopVariable = loopScope.$observable(eachValue[i],asSchema,false);
-//             let node = render({
-//                 descriptor,scope:loopScope,component:context.component
-//             })
-//             constant(false,node,'--loop-variable',loopVariable)
-//             exists.push(node)
-//         }
-//     }
-//     for(let i = eachValue.length,j=exists.length;i<j;i++){
-//         let removed = exists.shift()
-//         drop(removed)
-//     }
-//     exists.length = eachValue.length
-//     descriptor.attrs[attrName]=tmp
-// }
-
-
-// export function resolveBindValue(bindValue:any,context:TRenderContext,bind?:(value:any,observable:TObservable)=>any):{value:any,observable:TObservable}{
-//     let observable:TObservable
-//     let value = bindValue
-//     if(value){
-//         if(value instanceof ModelSchema){
-//             const ob:TObservable = context.scope.$observable((value as any).$schema||value)
-//             value = ob()
-//         }else if(value instanceof Observable){
-//             observable = value.--facade
-//             value = observable.getValue()
-//         }else if(value.$Observable){
-//             observable = value
-//             value = observable()
-//         }else if(value.$Observable && value.apply && value.call){
-//             observable = value.$Observable
-//             value = observable.getValue()
-//         }
-//     }
-//     if(bind)bind(value,observable)
-//     return {observable,value}
-
-// }
-
-
-
-
-
-function drop(node:TNode,remove?:boolean){
-    if(!node) return;
-    if(remove!==false)platform.remove(node)
-    let component = node['--component']
-    if(component && component.dispose) component.dispose()
-    else{
-        platform.eachChildren(node,(child,i)=>{
-            drop(child,false)
-        })
-    }
-}
-
-
-export class Component{
-
-}
-
-
-export type TNode = any;
-
-
-
-export const platform = {
-    createElement(tag:string):TNode{
-        return document.createElement(tag)
-    },
-    createText(txt:string):TNode{
-        return document.createTextNode(txt)
-    },
-    
-    createComment(comment):TNode{
-        return document.createComment(comment)
-    },
-    attach(node:TNode,evtName:string,handler:Function){
-        node.addEventListener(evtName,handler,false)
-    },
-    detech(node:TNode,evtName:string,handler:Function){
-        node.removeEventListener(evtName,handler,false)
-    },
-    mount(container:TNode,node:TNode){
-        container.innerHTML = ""
-        container.appendChild(node)
-    },
-    alive(node:TNode,value?:boolean):boolean{
-        if(value===undefined){
-            if(node['--alive']) return true
-            while(node){
-                if(node===document.body)return true
-                node = node.parentNode
-            }
-            return false
-        }
-        Object.defineProperty(node,'--alive',{enumerable:false,configurable:true,writable:false,value:value})
-        
-    },
-    appendChild(parent:TNode,child:TNode){
-        parent.appendChild(child)
-    },
-    insertBefore(inserted:TNode,relative:TNode){
-        relative.parentNode.insertBefore(inserted,relative)
-    },
-    remove(node:TNode):boolean{
-        if(node.parentNode) {node.parentNode.removeChild(node);return true }
-        return false
-    },
-    clear(node:TNode){
-        node.innerHTML = ""
-    },
-    eachChildren(node:TNode,callback:(child:TNode,i:number)=>any){
-        if(node.hasChildren){
-            for(let i = 0,j=node.childNodes.length;i<j;i++) callback(node.childNodes[i],i)
-        }
-    },
-    setText(node:TNode,txt:string){
-        if(node.innerText!==undefined) node.innerText = txt
-        else node.nodeValue = txt
-    },
-    setAttribute(node:TNode,name:string,value:any){
-        node.setAttribute(name,value)
-    }
-}
 

@@ -96,7 +96,7 @@ export declare function implicit(target?: any, name?: any, value?: any): any;
 export declare function constant(enumerable?: boolean, target?: any, name?: any, value?: any, week?: boolean): any;
 export declare function nop(): void;
 export declare class Exception extends Error {
-    constructor(msg: any, detail?: any, silence?: any);
+    constructor(msg: any, detail?: any);
 }
 export declare function rid(prefix?: string): string;
 export declare const None: any;
@@ -108,10 +108,9 @@ export declare class Disposiable {
 }
 export declare function subscribable(target: any): void;
 export declare class Subscription {
-    $subscribe(handler: any, extra?: any, disposable?: Disposiable): any;
+    $subscribe(handler: any, disposable: Disposiable): any;
     $unsubscribe(handler: any): any;
-    $publish(evt?: any, useApply?: boolean, filter?: (extras: any) => boolean): void;
-    $fulfill(evt?: any, useApply?: boolean, filter?: (extras: any) => boolean): void;
+    $publish(evt?: any, useApply?: boolean): void;
     static isInstance(obj: any): boolean;
 }
 export declare function eventable(target: any, name: any): void;
@@ -166,8 +165,8 @@ export declare class Schema {
     $default?: any;
     $fn?: Function;
     $args?: Schema[];
-    $item?: Schema;
-    length?: Schema;
+    $item?: ModelSchema;
+    length?: ModelSchema;
     $dpath: DPath;
     private '--dpath--'?;
     constructor(defaultValue: any, name?: string | Schema[], superSchema?: any, visitor?: any);
@@ -175,4 +174,160 @@ export declare class Schema {
     $asArray(defaultItemValue?: any, visitor?: any): Schema;
     static proxy(target?: any): any;
 }
+export declare type TObservable = {
+    [index in number | string]: TObservable;
+} & {
+    (value?: any, disposor?: any, capture?: boolean): any;
+    '$Observable': Observable1;
+};
+export declare class ModelSchema {
+    $type: ModelTypes;
+    $name?: string;
+    $superSchema?: ModelSchema;
+    $defaultValue?: any;
+    $dependenceSchemas?: ModelSchema[];
+    $itemSchema?: ModelSchema;
+    length?: ModelSchema;
+    private '--root'?;
+    private '--paths'?;
+    constructor(defaultValue?: any, name?: string | ModelSchema[], superSchema?: any, visitor?: {
+        handler: (schema: ModelSchema, parent: any) => any;
+        parent: any;
+    });
+    $prop(name: string, defaultValue?: any): ModelSchema;
+    $asArray(defaultItemValue?: any, context?: any): ModelSchema;
+    $dataPath(): DPath;
+    $paths(): string[];
+    $root(): ModelSchema;
+    static createBuilder(target: ModelSchema): any;
+    static constant: ModelSchema;
+}
+export declare type TNodeDescriptor = {
+    tag?: string;
+    content?: string | ModelSchema | TObservable;
+    component?: any;
+    attrs?: {
+        [name: string]: any;
+    };
+    children?: TNodeDescriptor[];
+};
+export declare type TObservableEvent = {
+    value?: any;
+    old?: any;
+    src?: any;
+    sender?: Observable1;
+    removed?: boolean;
+    cancel?: boolean;
+    stop?: boolean;
+};
+export declare class Observable1 {
+    type: ModelTypes;
+    name: string;
+    old: any;
+    value: any;
+    schema: ModelSchema;
+    super?: Observable1;
+    deps?: Observable1[];
+    dep_handler?: (evt: TObservableEvent) => any;
+    $observable: TObservable;
+    listeners?: {
+        (evt: TObservableEvent): any;
+    }[];
+    captures?: {
+        (evt: TObservableEvent): any;
+    }[];
+    hasChanges?: boolean;
+    length?: Observable1;
+    constructor(initial: any, schema?: ModelSchema, name?: string, superOb?: Observable1 | string);
+    get(): any;
+    set(value: any): Observable1;
+    defineProp(name: string, initial?: any): Observable1;
+    subscribe(handler: (evt: TObservableEvent) => any, disposer?: any): Observable1;
+    unsubscribe(handler: (evt: TObservableEvent) => any): Observable1;
+    capture(handler: (evt: TObservableEvent) => any, disposer?: any): Observable1;
+    uncapture(handler: (evt: TObservableEvent) => any): Observable1;
+    update(src?: any, removed?: boolean): Observable1;
+}
+export declare type TComponent = any;
+export declare class Meta {
+    tagName?: string;
+    resolved?: boolean;
+    activator: Activator;
+    scopeSchema?: ModelSchema;
+    modelSchema?: ModelSchema;
+    properties?: {
+        [name: string]: DPath & {
+            handlername?: string;
+        };
+    };
+    vnode?: TNodeDescriptor;
+    constructor(fn: Function);
+    tag(name: string): Meta;
+    props(names: {
+        [n: string]: string;
+    }): Meta;
+    static parseTemplateText: (text: string, self: any, model: any, scope: any) => TNodeDescriptor;
+    static components: {
+        [name: string]: Meta;
+    };
+    static modelname: string;
+}
+export declare function component(tag?: any, fn?: any): any;
+export declare type TBindScope = {
+    $superScope: TBindScope;
+    $fetch(name: string): TObservable;
+    $resolve(bindValue: any, expandOb?: boolean): any;
+    $createScope(name?: string, schema?: ModelSchema): any;
+} & TObservable;
+export declare class BindScope extends Observable1 {
+    constructor(schema: ModelSchema, name: string, superScope: BindScope, model: TObservable);
+    $createScope(name?: string, schema?: any): BindScope;
+}
+export declare class ComponentRuntime {
+    opts: TNodeDescriptor;
+    meta: Meta;
+    parent?: ComponentRuntime;
+    instance: TComponent;
+    elements: any[];
+    model: Observable1;
+    children: ComponentRuntime[];
+    services: InjectScope;
+    scope: BindScope;
+    slots: {
+        [name: string]: TNodeDescriptor[];
+    };
+    sid: string;
+    constructor(opts: TNodeDescriptor, meta: Meta, parent?: ComponentRuntime);
+    initialize(bindContext: TBindContext): void;
+    render(bindContext: TBindContext): any[];
+}
+export declare class PropertyBinding {
+    observable: TObservable;
+    handler: Function;
+    constructor(bindValue: any);
+}
+export declare type TBindContext = {
+    component: ComponentRuntime;
+    scope: TBindScope;
+    options: any;
+};
+export declare class Component {
+}
+export declare type TNode = any;
+export declare const platform: {
+    createElement(tag: string): any;
+    createText(txt: string): any;
+    createComment(comment: any): any;
+    attach(node: any, evtName: string, handler: Function): void;
+    detech(node: any, evtName: string, handler: Function): void;
+    mount(container: any, node: any): void;
+    alive(node: any, value?: boolean): boolean;
+    appendChild(parent: any, child: any): void;
+    insertBefore(inserted: any, relative: any): void;
+    remove(node: any): boolean;
+    clear(node: any): void;
+    eachChildren(node: any, callback: (child: any, i: number) => any): void;
+    setText(node: any, txt: string): void;
+    setAttribute(node: any, name: string, value: any): void;
+};
 export {};
