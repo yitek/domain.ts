@@ -407,12 +407,18 @@ export function rid(prefix?:string){
     return rs + rnd.toString()
 }
 
-export const None = new Proxy(function(){return this},{
+export const NONE = new Proxy(function(){return this},{
     get(){return undefined},
     set(){return this}
 })
-
-
+export const REMOVE = new Proxy(function(){return this},{
+    get(){return undefined},
+    set(){return this}
+})
+export const USEAPPLY = new Proxy(function(){return this},{
+    get(){return undefined},
+    set(){return this}
+})
 
 
 const dispose = function(handler?){
@@ -491,12 +497,23 @@ export function subscribable(target){
         }
         return this;
     }})
-    Object.defineProperty(target,'$publish',{enumerable:false,configurable:true,writable:true,value:function(arg?:any,useApply?:boolean,filter?:(extras)=>boolean){
+    Object.defineProperty(target,'$publish',{enumerable:false,configurable:true,writable:true,value:function(arg?:any,useApply?:any,filter?:(extras)=>boolean){
         let handlers = this['--subscribable--']
         if (!handlers) return this
         if(handlers['--fulfill--']) throw new Exception('已经具有终值，不能再调用$publish')
+        let arg1 = useApply
+        if(USEAPPLY===useApply){
+            useApply = true
+        }else {
+            if(useApply && useApply.call && useApply.apply && filter ===undefined) {
+                filter = useApply
+                arg1 = undefined
+            }
+            useApply=false
+        }
         for(let i =0,j=handlers.length;i<j;i++) {
             const callbacker :any= (handlers as []).shift();
+            if(!callbacker) continue
             const extras = callbacker.extras
             if (filter && !filter(extras)){
                 handlers.push(callbacker)
@@ -504,46 +521,71 @@ export function subscribable(target){
                 const self = extras===undefined?this:extras
                 let result
                 if (useApply) result = callbacker.handler.apply(self,arg)
-                else result = callbacker.handler.call(self, arg)
-                if (result!==observableRemoveToken) handlers.push(result)
+                else if(arg1===undefined) result = callbacker.handler.call(self, arg)
+                else result = callbacker.handler.call(self,arg,arg1)
+                if (result!==REMOVE) handlers.push(callbacker)
+                else if (result===false) return false
             }
         }
         return this
     }})
-    Object.defineProperty(target,'$fulfill',{enumerable:false,configurable:true,writable:true,value:function(arg?:any,useApply?:boolean,filter?:(extras)=>boolean){
+    Object.defineProperty(target,'$fulfill',{enumerable:false,configurable:true,writable:true,value:function(arg?:any,useApply?:any,filter?:(extras)=>boolean){
         let handlers = this['--subscribable--']
         if (handlers && handlers['--fulfill--']) {
             throw new Exception('已经具有了终值，不可以再调用$fulfill函数')
         }
-
-        const fulfill = {'--fulfill--':true,'--fulfill-value--':arg,'--fulfill-use-apply--':useApply,'--fulfill-filter--':filter}
+        let arg1 = useApply
+        if(USEAPPLY===useApply){
+            useApply = true
+        }else {
+            if(useApply && useApply.call && useApply.apply && filter ===undefined) {
+                filter = useApply
+                arg1 = undefined
+            }
+            useApply=false
+        }
+        const fulfill = {'--fulfill--':true,'--fulfill-value--':arg,'--fulfill-value1--':arg1,'--fulfill-use-apply--':useApply,'--fulfill-filter--':filter}
         Object.defineProperty(this,'--subscribable--',{configurable:false,writable:false,enumerable:false,value:fulfill})
         if(!handlers || handlers.length===0) return this
+
         for(let i =0,j=handlers.length;i<j;i++) {
             const callbacker :any= (handlers as []).shift();
+            if(!callbacker) continue
             const extras = callbacker.extras
-            if (filter && !filter(extras)){continue}
-            const self = extras===undefined?this:extras
-            if (useApply) callbacker.handler.apply(self,arg)
-            else callbacker.handler.call(self, arg)
+            if (filter && !filter(extras)){
+                handlers.push(callbacker)
+            } else {
+                const self = extras===undefined?this:extras
+                let result
+                if (useApply) result = callbacker.handler.apply(self,arg)
+                else if(arg1===undefined) result = callbacker.handler.call(self, arg)
+                else result = callbacker.handler.call(self,arg,arg1)
+                if (result===false) return false
+            }
         }
         return this
     }})
 }
-const observableRemoveToken = {}
-Object.defineProperty(subscribable,'REMOVE',{configurable:false,writable:false,enumerable:false,value:observableRemoveToken})
+
+subscribable.REMOVE = REMOVE
+Object.defineProperty(subscribable,'REMOVE',{configurable:false,writable:false,enumerable:false,value:REMOVE})
+subscribable.USEAPPLY = USEAPPLY
+Object.defineProperty(subscribable,'USEAPPLY',{configurable:false,writable:false,enumerable:false,value:USEAPPLY})
 
 export class Subscription{
     $subscribe(handler:any,extra?,disposable?:Disposiable):any{throw 'abstract method'}
     $unsubscribe(handler:any):any{throw 'abstract method'}
-    $publish(evt?:any,useApply?:boolean,filter?:(extras)=>boolean){throw 'abstract method'}
-    $fulfill(evt?:any,useApply?:boolean,filter?:(extras)=>boolean){throw 'abstract method'}
+    $publish(evt?:any,useApply?:any,filter?:(extras)=>boolean){throw 'abstract method'}
+    $fulfill(evt?:any,useApply?:any,filter?:(extras)=>boolean){throw 'abstract method'}
     static isInstance(obj:any):boolean{
         return (obj && obj.$subscribe && obj.$unsubscribe && obj.$publish && obj.$fulfill)
     }
+    static REMOVE
+    static USEAPPLY
 }
 subscribable(Subscription.prototype)
-Object.defineProperty(Subscription,'REMOVE',{configurable:false,writable:false,enumerable:false,value:observableRemoveToken})
+Object.defineProperty(Subscription,'REMOVE',{configurable:false,writable:false,enumerable:false,value:REMOVE})
+Object.defineProperty(Subscription,'USEAPPLY',{configurable:false,writable:false,enumerable:false,value:USEAPPLY})
 
 export function eventable(target,name){
     const privateName = '--event-' + name + '-handlers'
@@ -884,3 +926,317 @@ const schemaProxyTraps = {
     }
 };
 
+////////////////////////////////////////////////
+// Observable
+//
+
+
+
+export type TObservable = {
+    [index in number | string]: TObservable
+} & {
+    (value?: any,capture?:boolean,disposor?:any): any
+    '$Observable':Observable
+    $observable:TObservable
+}
+
+export type TObservableEvent = {
+    value?:any
+    old?:any
+    src?:any
+    sender?:TObservable
+    removes?:TObservable[]
+    appends?:TObservable[]
+    removed?:boolean
+    cancel?:boolean
+    stop?:boolean
+}
+
+export class Observable extends Subscription{
+    type:ModelTypes
+    name:string
+    old:any
+    value:any
+    schema: Schema
+    super?:Observable
+    deps?:Observable[]
+    dep_handler?:(evt:TObservableEvent)=>any
+    $observable:TObservable
+    listeners?:{(evt:TObservableEvent):any}[]
+    captures?:{(evt:TObservableEvent):any}[]
+    hasChanges?:number
+    length?:Observable
+    constructor(initial,schema:Schema,name:string,superOb:Observable){
+        super()
+        if(!schema) schema = new Schema(initial)
+        if(name===undefined) name = schema.$name
+        this.name = name
+        this.super = superOb
+        this.hasChanges = 0
+    }
+    set(value,src?):Observable{
+        if(this.value===value) return this
+        if(src!==undefined) this.update(src)
+        return this
+    }
+    get():any{
+        return this.value
+    }
+    update(src:any):any{
+        if(this.value===this.old) return
+        const evt:TObservableEvent = {
+            value:this.value,
+            old:this.old,
+            sender : this.$observable,
+            src: src
+        }
+        this.$publish(evt,false,(extras)=>extras===false)
+        if(evt.cancel) return false
+        return true
+    }
+}
+
+export function ObservableValue(inital,schema:Schema,name:string,superOb:Observable){
+    if(!this.update && !this.set) for(const n in Observable.prototype) this[n] = Observable.prototype[n]
+    this.type = ModelTypes.value
+    if(!name && schema) name = schema.$name
+    this.name = name
+    this.schema = schema || new Schema(undefined,name,superOb?.schema)
+    this.super = superOb
+    this.value = this.old = inital 
+}
+
+export function ObservableObject(inital,schema:Schema,name:string,superOb:Observable){
+    if(!Subscription.isInstance(this)) subscribable(this)
+    this.get = function(){ return this.value }
+    this._typeValue = (obj)=>is_object(obj)?obj:{}
+    this.set = function(value,src?){
+        if(!value) value = {}
+        if(this.super && this.name && value!==this.value) this.super.value[this.name] = value
+        this.value = value
+        const ob = this.$observable
+        const mod = observable.mode
+        observable.mode = ObservableModes.delay
+        
+        for(const propname in ob) {
+            const prop = ob[propname]
+            let propValue = value[propname]
+            if(propValue===undefined) propValue = NONE
+            prop(propValue)
+        }
+        observable.mode = mod
+        if (src!==undefined) this.update(src)
+        return this as any
+    }
+
+    this.update = function(src?){
+        let hasSelfChanges = false
+        let evt:TObservableEvent,old = this.old,value=this.value
+        let cancelBubble = false
+        if(old !== value){
+            this.old= value
+            evt = {
+                value:value,
+                old:old,
+                sender : this.$observable,
+                src: src
+            }
+            if(this.$publish(evt,false,(extras)=>extras===false)===false) return false
+            // 不再向上传播
+            if(evt.cancel) cancelBubble = true
+            if(evt.stop) return true
+            hasSelfChanges = true
+        }
+
+        let hasChildrenChanges = false
+        const ob = this.$observable
+        for(const propname in ob) {
+            const prop :Observable= ob[propname](Observable)
+            if(prop.update(src)) hasChildrenChanges = true
+        }
+
+        if(hasChildrenChanges) {
+            if(!evt){
+                evt = {
+                    value:this.value,
+                    old:this.old,
+                    sender : this.$observable,
+                    src: src
+                } 
+            } else evt.cancel = evt.stop = false
+            this.$publish(evt,false,(extras)=>extras===true)
+            if(evt.cancel) return false
+            if(evt.stop) return true
+        }
+        return (hasChildrenChanges || hasSelfChanges) && !cancelBubble
+    }
+    const ob = this.$observable? this.$observable : (this.$observable = create_observable(this))
+    if(!name && schema) name = schema.$name
+    this.name = name
+    this.type = ModelTypes.object
+    this.super= superOb
+    if(!is_object(inital)){
+        inital = {}
+        if(superOb && name!==undefined) superOb.value[name] = inital
+    } 
+    this.value = this.old = inital
+
+    if(schema){
+        this.schema = schema
+        for(const propname in schema) {
+            const propValue = inital[propname]
+            const Ob = new Observable(propValue,schema[propname],propname, this)
+            Object.defineProperty(ob,propValue,{enumerable:true,configurable:true,writable:false,value:Ob.$observable})
+        }
+    }else{
+        schema = this.schema = new Schema(undefined,name,superOb?.schema)
+        for(const propname in inital) {
+            const propValue = inital[propname]
+            const Ob = new Observable(propValue,null,propname,this)
+            Object.defineProperty(ob,propValue,{enumerable:true,configurable:true,writable:false,value:Ob.$observable})
+        }
+    }
+
+}
+
+export function ObservableArray(inital,schema:Schema,name:string,superOb:Observable){
+    if(!Subscription.isInstance(this)) subscribable(this)
+    this.get = function(){ 
+        const result = []
+        for(let i = 0,j= this.length.value;i<j;i++) {
+            const item = ob[i]()
+            result.push(item)
+        }
+        return result
+     }
+    this._typeValue = (obj)=>is_array(obj)?obj:[]
+    // this.set = observable_setObject
+    this.update = function(src?){
+        let hasSelfChanges = false,evt:TObservableEvent,old = this.old , value = this.value
+        if(old !== value){
+            this.old = value
+            evt = {
+                value:value,
+                old:old,
+                sender : this.$observable,
+                src: src
+            }
+            this.$publish(evt,false,(extras)=>extras===false)
+            if(evt.cancel) return false
+            if(evt.stop) return true
+            hasSelfChanges = true
+        }
+        const oldLength = this.length.old
+        const lengthResult = this.length.update(src)
+        if(lengthResult!==undefined) return lengthResult
+        
+        let hasChildrenChanges = false
+        const ob = this.$observable
+        const appends =[]
+        const removes = []
+        for(let i =0,j=value.length;i<j;i++) {
+            const name = i.toString()
+            const prop_ob :TObservable= ob[name];
+            if(prop_ob) {
+                if(prop_ob(Observable).update(src)) hasChildrenChanges = true
+            }else{
+                const item = new Observable(value[i],this.item,name,this)
+                appends.push(item.$observable)
+                hasChildrenChanges = true
+            }
+            
+        }
+        for(let i = value.length,j=oldLength;i<j;i++) {
+            const name = i.toString()
+            const prop_ob :TObservable= ob[name]
+            //TODO: update for remove
+            removes.push(prop_ob)
+        }
+
+        
+        
+        
+        if(hasChildrenChanges) {
+            if(!evt){
+                evt = {
+                    value:this.value,
+                    old:this.old,
+                    sender : this.$observable,
+                    appends:appends,
+                    removes:removes,
+                    src: src
+                } 
+            } else evt.cancel = evt.stop = false
+            this.$publish(evt,false,(extras)=>extras===true)
+            if(evt.cancel) return false
+            if(evt.stop) return true
+        }
+        return hasChildrenChanges || hasSelfChanges
+    }
+    const ob = this.$observable? this.$observable : (this.$observable = create_observable(this))
+    if(!name && schema) name = schema.$name
+    this.name = name
+    this.type = ModelTypes.array
+    this.super= superOb
+    if(!is_object(inital)){
+        inital = {}
+        if(superOb && name!==undefined) superOb.value[name] = inital
+    } 
+    this.value = this.old = inital
+
+    if(schema){
+        this.schema = schema
+        for(const propname in schema) {
+            const propValue = inital[propname]
+            const Ob = new Observable(propValue,schema[propname],propname, this)
+            Object.defineProperty(ob,propValue,{enumerable:true,configurable:true,writable:false,value:Ob.$observable})
+        }
+    }else{
+        schema = this.schema = new Schema(undefined,name,superOb?.schema)
+        for(const propname in inital) {
+            const propValue = inital[propname]
+            const Ob = new Observable(propValue,null,propname,this)
+            Object.defineProperty(ob,propValue,{enumerable:true,configurable:true,writable:false,value:Ob.$observable})
+        }
+    }
+
+}
+
+
+function create_observable(info:Observable):TObservable{
+    const ob = function(value:any,isCapture?:boolean,disposer?){
+        if(value === undefined) return info.value
+        if(value === Schema) return info.schema
+        if(value === Observable) return info
+        if(value === observable) return ob
+
+        if(value===NONE) value = undefined
+        else if(value.$Observable) value = value.$Observable.value
+        
+        if (isCapture===undefined){
+            info.set(value,disposer)
+        } else if(isCapture===true){
+            info.$subscribe(value,true,disposer)
+        } else if(isCapture===false){
+            info.$subscribe(value,false,disposer)
+        } else if(isCapture===null){
+            info.$unsubscribe(value)
+        } else throw new Exception('observable的第2个参数类型不正确，只能为undefined/null/true,false')
+        return ob
+
+    }
+    ob.toString = ()=>info.value===undefined || info.value=== null?'':info.value.toString()
+    Object.defineProperty(ob,'$observable',{configurable:false,writable:false,enumerable:false,value:ob})
+    Object.defineProperty(ob,'$Observable',{configurable:false,writable:false,enumerable:false,value:info})
+    return ob as any
+}
+
+
+export enum ObservableModes{
+    delay,
+    immediately
+}
+function observable(initial?){
+
+}
+observable.mode = ObservableModes.delay

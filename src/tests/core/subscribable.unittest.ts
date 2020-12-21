@@ -27,15 +27,22 @@ testable('core.subscribable',{
     '传递多个参数给监听函数':(ASSERT)=>{
         const target = new Subscription()
        
-        let listenerEventArg1,listenerEventArg2
-        function listener(evt1,evt2){
+        let listenerEventArg1,listenerEventArg2,listenerEventArg3
+        function listener(evt1,evt2,evt3){
             listenerEventArg1 = evt1
             listenerEventArg2 = evt2
+            listenerEventArg3 = evt3
         }
         target.$subscribe(listener)
-        target.$publish([5,3],true)
+        debugger
+        target.$publish(5,3)
         ASSERT({
-            '$publish可以通过第二个参数来指定传递多个参数给监听函数':()=>listenerEventArg1===5 && listenerEventArg2===3
+            '$publish可以通过第二个参数来传递第二个参数':()=>listenerEventArg1===5 && listenerEventArg2===3
+        })
+        
+        target.$publish([11,22,33],subscribable.USEAPPLY)
+        ASSERT({
+            '$publish可以通过USEAPPLY指令来传递多个参数给监听函数':()=>listenerEventArg1===11 && listenerEventArg2===22 && listenerEventArg3 === 33
         })
     },
     '自动释放监听函数':(ASSERT)=>{
@@ -75,7 +82,7 @@ testable('core.subscribable',{
         function listener2(){ invoked2 = true }
         target.$subscribe(listener1,1)
         target.$subscribe(listener2,2)
-        target.$publish(undefined,false,(extra)=>extra===2)
+        target.$publish(undefined,(extra)=>extra===2)
         ASSERT({
             '$publish第三个参数可以指定一个过滤函数，$subscribe函数的第二个参数将作为extra变量传入该过滤函数，如果该过滤函数返回广义的false,那么对应的监听函数不会被执行':()=>!invoked1 && invoked2
         })
@@ -87,7 +94,6 @@ testable('core.subscribable',{
         target.$subscribe(listener1)
         target.$fulfill(20)
         function listener2(v){ invoked2 = v }
-        debugger
         target.$subscribe(listener2)
         ASSERT({
             '可以用$fulfill函数赋予该对象一个终值,赋予终值时，所有订阅的监听函数会被调用':()=>invoked1===20,

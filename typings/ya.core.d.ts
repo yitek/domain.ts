@@ -99,7 +99,9 @@ export declare class Exception extends Error {
     constructor(msg: any, detail?: any, silence?: any);
 }
 export declare function rid(prefix?: string): string;
-export declare const None: any;
+export declare const NONE: any;
+export declare const REMOVE: any;
+export declare const USEAPPLY: any;
 export declare function disposable(target: any): any;
 export declare class Disposiable {
     $disposed?: boolean;
@@ -107,12 +109,18 @@ export declare class Disposiable {
     static isInstance(obj: any): boolean;
 }
 export declare function subscribable(target: any): void;
+export declare namespace subscribable {
+    var REMOVE: any;
+    var USEAPPLY: any;
+}
 export declare class Subscription {
     $subscribe(handler: any, extra?: any, disposable?: Disposiable): any;
     $unsubscribe(handler: any): any;
-    $publish(evt?: any, useApply?: boolean, filter?: (extras: any) => boolean): void;
-    $fulfill(evt?: any, useApply?: boolean, filter?: (extras: any) => boolean): void;
+    $publish(evt?: any, useApply?: any, filter?: (extras: any) => boolean): void;
+    $fulfill(evt?: any, useApply?: any, filter?: (extras: any) => boolean): void;
     static isInstance(obj: any): boolean;
+    static REMOVE: any;
+    static USEAPPLY: any;
 }
 export declare function eventable(target: any, name: any): void;
 export declare type TInjectFactory = (name: string, scope: InjectScope, target?: any) => any;
@@ -174,5 +182,53 @@ export declare class Schema {
     $defineProp(name: string, propDefaultValue?: any, visitor?: any): Schema;
     $asArray(defaultItemValue?: any, visitor?: any): Schema;
     static proxy(target?: any): any;
+}
+export declare type TObservable = {
+    [index in number | string]: TObservable;
+} & {
+    (value?: any, capture?: boolean, disposor?: any): any;
+    '$Observable': Observable;
+    $observable: TObservable;
+};
+export declare type TObservableEvent = {
+    value?: any;
+    old?: any;
+    src?: any;
+    sender?: TObservable;
+    removes?: TObservable[];
+    appends?: TObservable[];
+    removed?: boolean;
+    cancel?: boolean;
+    stop?: boolean;
+};
+export declare class Observable extends Subscription {
+    type: ModelTypes;
+    name: string;
+    old: any;
+    value: any;
+    schema: Schema;
+    super?: Observable;
+    deps?: Observable[];
+    dep_handler?: (evt: TObservableEvent) => any;
+    $observable: TObservable;
+    listeners?: {
+        (evt: TObservableEvent): any;
+    }[];
+    captures?: {
+        (evt: TObservableEvent): any;
+    }[];
+    hasChanges?: number;
+    length?: Observable;
+    constructor(initial: any, schema: Schema, name: string, superOb: Observable);
+    set(value: any, src?: any): Observable;
+    get(): any;
+    update(src: any): any;
+}
+export declare function ObservableValue(inital: any, schema: Schema, name: string, superOb: Observable): void;
+export declare function ObservableObject(inital: any, schema: Schema, name: string, superOb: Observable): void;
+export declare function ObservableArray(inital: any, schema: Schema, name: string, superOb: Observable): void;
+export declare enum ObservableModes {
+    delay = 0,
+    immediately = 1
 }
 export {};
