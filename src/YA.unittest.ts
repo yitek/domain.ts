@@ -245,7 +245,7 @@ function meta(testTarget,arg:any){
 }
 
 const todos = []
-export function testable(desp:any,test?){
+export function testable(desp:any,test?):any{
     if(test!==undefined){
         const t = typeof test
         if(t==='function'){
@@ -255,9 +255,11 @@ export function testable(desp:any,test?){
             }
             const tm = TestMethod.fetch(test)
             if(meta(tm,desp)!==false)  return addTodos(tm)
+            return doTestImmediately
         }else if (t==='object'){
             const tc = TestClass.fetch(test)
             if(meta(tc,desp)!==false) return addTodos(tc)
+            doTestImmediately
         }throw '错误的参数'
     }
     
@@ -292,21 +294,12 @@ function addTodos(executable:TExecutable){
         }, 0);
     }
     todos.push(executable)
+    return doTestImmediately
 }
 
-
-let tests=
-{
-    testA(ASSERTS){
-        let a =1
-        let b =2
-        ASSERTS({
-            'a与b要相等':()=>a===b
-        })
-        let c = 3
-        ASSERTS({
-            'c与a要相等':()=>c==a
-        })
-    }
+function doTestImmediately(){
+    
+    let executable:TExecutable
+    while(executable = todos.shift()) executable.execute(Logger.default)
 }
-//testable(true,tests)
+

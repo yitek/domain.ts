@@ -1,7 +1,7 @@
 import {testable} from '../../YA.unittest'
 import {Activator} from '../../YA.core'
 
-testable('core.Activator',{
+export default testable('core.Activator',{
     '构造函数参数传递':(ASSERT)=>{
         function ClassA(age,gender){this.age = age;this.gender = gender}
         ClassA.prototype = {

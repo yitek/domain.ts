@@ -8,29 +8,125 @@
     }
 })(function (require, exports) {
     "use strict";
-    var _this = this;
     Object.defineProperty(exports, "__esModule", { value: true });
     var YA_unittest_1 = require("../../YA.unittest");
     var YA_core_1 = require("../../YA.core");
-    YA_unittest_1.testable('core.observable', {
-        disposable: function (ASSERT) {
-            var disposer = YA_core_1.disposable({});
+    exports.default = YA_unittest_1.testable('core.observable', {
+        '基础用法': function (ASSERT) {
+            // 创建一个可监听对象
+            var ob = YA_core_1.observable(12);
             ASSERT({
-                "调用disposable的对象会自动生成$dispose函数": function () { return typeof disposer.$dispose === 'function'; }
+                '可以通过observable.isInstance来判断是否是可监听对象': function () { return YA_core_1.observable.isInstance(ob); },
+                '可以获取值': function () { return ob() === 12; }
             });
-            var disposeInvoked1;
-            var disposeInvoked2;
-            disposer.$dispose(function () { disposeInvoked1 = this; });
-            disposer.$dispose(function () { return disposeInvoked2 = _this; });
-            disposer.$dispose();
+            // 监听变化
+            var change;
+            ob(YA_core_1.ATTACH, function (evt) { return change = evt; });
+            // 赋值并立即触发监听
+            ob(32, true);
             ASSERT({
-                "可以通过$dispose(callback)附加释放后回调函数，该函数会在$dispose()调用时被依次调用": function () { return disposeInvoked1 && disposeInvoked2; },
-                '回调函数的this指向disposable本身': function () { return disposeInvoked1 === disposer; }
+                '获取的值为新值': function () { return ob() === 32; },
+                '监听函数被触发': function () { return change !== undefined; },
+                '监听函数接收一个TObservableChange对象，记录了变化前的值与变化后的值': function () { return change.old === 12 && change.value === 32 && change.sender === ob; }
             });
-            disposer.$dispose(function () { return disposeInvoked1 = true; });
+        },
+        '类型为对象的可观察对象': function (ASSERT) {
+            var now = new Date();
+            var schema = new YA_core_1.Schema({
+                filters: {
+                    keyword: 'yiy',
+                    createTime: { min: null, max: now }
+                },
+                pageIndex: 1,
+                pageSize: 10
+            });
+            var ob = YA_core_1.observable(schema);
             ASSERT({
-                '已经释放的对象可以再追加释放回调，该回调函数会立即执行': function () { return disposeInvoked1 === true; }
+                '有跟schema一样的结构': function () { return ob.filters.keyword() === 'yiy' && ob.filters.createTime.max() === now && ob.pageIndex() === 1 && ob.pageSize() === 10; }
             });
+        },
+        '对象上的事件冒泡': function (ASSERT) {
+            var now = new Date();
+            var ob = YA_core_1.observable({
+                filters: {
+                    keyword: 'yiy',
+                    createTime: { min: null, max: now }
+                },
+                pageIndex: 1,
+                pageSize: 10
+            });
+            var rootChange;
+            ob.$subscribe(function (change) { return rootChange = change; }, true);
+            var filterChange;
+            ob.filters.$subscribe(function (change) {
+                filterChange = change;
+                change.cancel = true;
+            }, true);
+            var keywordChange;
+            ob.filters.keyword.$subscribe(function (change) { return keywordChange = change; }, true);
+            ob.filters.keyword('yi', true);
+            ASSERT({
+                '如果修改了属性值，所有上级对象都会接收到捕捉的事件': function () { return keywordChange !== undefined && filterChange !== undefined; },
+                '由于filters的捕捉函数设置了cancel，所以事件不再向上冒泡': function () { return rootChange === undefined; }
+            });
+        },
+        '对象上的事件传播': function (ASSERT) {
+            var now = new Date();
+            debugger;
+            var ob = YA_core_1.observable({
+                filters: {
+                    keyword: 'yiy',
+                    createTime: { min: null, max: now }
+                },
+                pageIndex: 1,
+                pageSize: 10
+            });
+            var rootChange;
+            ob.$subscribe(function (change) { return rootChange = change; }, true);
+            var filterChangeCapture;
+            ob.filters.$subscribe(function (change) {
+                filterChangeCapture = change;
+            }, true);
+            var filtersChange;
+            ob.filters.$subscribe(function (change) {
+                filtersChange = change;
+            });
+            var createTimeChange;
+            ob.filters.createTime.$subscribe(function (change) {
+                createTimeChange = change;
+                change.stop = true;
+            });
+            var minChange;
+            ob.filters.createTime.min.$subscribe(function (change) { return minChange = change; });
+            debugger;
+            ob.filters({ keyword: 'yi', createTime: { min: '2020-12-24', max: now } });
+            debugger;
+            ob.filters.$update(null);
+            ASSERT({
+                '修改了中间对象，捕获的监听器跟一般的监听器都会收到通知': function () { return filtersChange !== undefined && filterChangeCapture !== undefined; },
+                '事件先向上传播，然后向下传播': function () { return rootChange !== undefined && createTimeChange !== undefined; }
+            });
+        },
+        '对象上的事件冒泡1': function (ASSERT) {
+            var now = new Date();
+            var schema = new YA_core_1.Schema({
+                filters: {
+                    keyword: 'yiy',
+                    createTime: { min: null, max: now }
+                },
+                pageIndex: 1,
+                pageSize: 10
+            });
+            var ob = YA_core_1.observable(schema);
+            // 事件的向上传导(冒泡)
+            var rootChange;
+            ob.$subscribe(function (change) { return rootChange = change; });
+            var filterChange;
+            ob.filters.$subscribe(function (change) { return filterChange; });
+            var keywordChange;
+            ob.filters.keyword.$subscribe(function (change) { return keywordChange = change; });
+            // 更新值，并立即刷新
+            ob.filters.keyword('yi', true);
         }
     });
 });

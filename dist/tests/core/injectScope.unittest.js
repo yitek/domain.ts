@@ -17,7 +17,7 @@ var __decorate = (this && this.__decorate) || function (decorators, target, key,
     Object.defineProperty(exports, "__esModule", { value: true });
     var YA_unittest_1 = require("../../YA.unittest");
     var YA_core_1 = require("../../YA.core");
-    YA_unittest_1.testable('core.injectable', {
+    exports.default = YA_unittest_1.testable('core.injectable', {
         '注册与获取': function (ASSERT) {
             function ClassA(age) { this.age = age; }
             // 创建一个注入容器

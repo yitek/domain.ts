@@ -11,7 +11,7 @@
     Object.defineProperty(exports, "__esModule", { value: true });
     var YA_unittest_1 = require("../../YA.unittest");
     var YA_core_1 = require("../../YA.core");
-    YA_unittest_1.testable('core.Schema', {
+    exports.default = YA_unittest_1.testable('core.Schema', {
         '基础用法': function (ASSERT) {
             var schemaValue = new YA_core_1.Schema(12);
             ASSERT({

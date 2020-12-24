@@ -11,7 +11,7 @@
     Object.defineProperty(exports, "__esModule", { value: true });
     var YA_unittest_1 = require("../../YA.unittest");
     var YA_core_1 = require("../../YA.core");
-    YA_unittest_1.testable('core.Activator', {
+    exports.default = YA_unittest_1.testable('core.Activator', {
         '构造函数参数传递': function (ASSERT) {
             function ClassA(age, gender) { this.age = age; this.gender = gender; }
             ClassA.prototype = {

@@ -11,7 +11,7 @@
     Object.defineProperty(exports, "__esModule", { value: true });
     var YA_unittest_1 = require("../../YA.unittest");
     var YA_core_1 = require("../../YA.core");
-    YA_unittest_1.testable('core.subscribable', {
+    exports.default = YA_unittest_1.testable('core.subscribable', {
         '基本用法': function (ASSERT) {
             var target = {};
             YA_core_1.subscribable(target);

@@ -1,7 +1,7 @@
 import {testable} from '../../YA.unittest'
 import {disposable} from '../../YA.core'
 
-testable('core.dispose',{
+export default testable('core.dispose',{
     disposable:(ASSERT)=>{
         const disposer = disposable({})
         ASSERT({

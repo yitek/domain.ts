@@ -1,3 +1,5 @@
+import schemaUnittest from "./tests/core/schema.unittest";
+
 declare let YA
 ///////////////////////////////////////////////////////////////
 // 一 JS机制的扩展部分
@@ -17,6 +19,14 @@ export function is_number(obj:any):boolean{
 export function is_assoc(obj:any):boolean{
     if (!obj) return false;
     return Object.prototype.toString.call(obj)==="[object Object]";
+}
+
+export function is_date(obj:any):boolean{
+    return obj && Object.prototype.toString.call(obj)==="[object Date]";
+}
+
+export function is_regex(obj:any):boolean{
+    return obj && Object.prototype.toString.call(obj)==="[object RegExp]";
 }
 
 
@@ -164,8 +174,11 @@ export function array_remove(arr:any[],item:any):boolean{
 // 对象处理
 
 export function clone(obj:any,_clones?:any[]){
+    if(!obj) return obj
     const t = typeof obj;
     if(t==='object'){
+        if(is_date(obj)) return new Date(obj.valueOf())
+        else if(is_regex(obj)) return obj
         if(!_clones) _clones=[];
         else for(const cloneInfo of _clones){
             if(cloneInfo.origin===obj) return cloneInfo.cloned;
@@ -338,17 +351,16 @@ export function accessable(desc:any,target?,name?,value?){
         return target;
     }
 
-    if(typeof name==='object'){
-        if(is_array(name)) {
-            for(const membername of name) {
-                desc.value = target[membername];
-                Object.defineProperty(target, membername , desc);
-            }
-        }else {
-            for(var n in name) {
-                desc.value = name[n];
-                Object.defineProperty(target , n , desc);
-            }
+    if(is_array(name)){
+        for(const membername of name) {
+            desc.value = target[membername];
+            Object.defineProperty(target, membername , desc);
+        }
+        return target
+    }else if(is_object(name)){
+        for(var n in name) {
+            desc.value = name[n];
+            Object.defineProperty(target , n , desc);
         }
         return target;
     }
@@ -383,10 +395,11 @@ export function nop(){}
 
 export class Exception extends Error{
     constructor(msg,detail?:any,silence?){
-        console.error(msg,detail);
+        if(Exception.printError)console.error(msg,detail);
         super(msg);
         if(detail)for(let n in detail) this[n] = detail[n];
     }
+    static printError:boolean=false
 }
 ///////////////////////////////////////////////
 // 二 基础机制类
@@ -411,7 +424,21 @@ export const NONE = new Proxy(function(){return this},{
     get(){return undefined},
     set(){return this}
 })
+
+export const ATTACH = new Proxy(function(){return this},{
+    get(){return undefined},
+    set(){return this}
+})
+
+export const DETECH = new Proxy(function(){return this},{
+    get(){return undefined},
+    set(){return this}
+})
 export const REMOVE = new Proxy(function(){return this},{
+    get(){return undefined},
+    set(){return this}
+})
+export const UPDATE = new Proxy(function(){return this},{
     get(){return undefined},
     set(){return this}
 })
@@ -481,6 +508,8 @@ export class Disposiable{
     }
 }
 disposable(Disposiable.prototype)
+disposable.isInstance = Disposiable.isInstance
+Object.defineProperty(disposable,'isInstance',{configurable:false,writable:false,enumerable:false,value:Disposiable.isInstance})
 
 //////////////////////////////////////////////////////////////
 // Subscribe/Publish
@@ -534,10 +563,11 @@ export function subscribable(target){
         if(USEAPPLY===useApply){
             useApply = true
         }else {
-            if(useApply && useApply.call && useApply.apply && filter ===undefined) {
+            if(filter===undefined && useApply instanceof Function){
                 filter = useApply
                 arg1 = undefined
             }
+            
             useApply=false
         }
         for(let i =0,j=handlers.length;i<j;i++) {
@@ -567,7 +597,7 @@ export function subscribable(target){
         if(USEAPPLY===useApply){
             useApply = true
         }else {
-            if(useApply && useApply.call && useApply.apply && filter ===undefined) {
+            if(filter===undefined && useApply instanceof Function){
                 filter = useApply
                 arg1 = undefined
             }
@@ -604,8 +634,8 @@ Object.defineProperty(subscribable,'USEAPPLY',{configurable:false,writable:false
 export class Subscription{
     $subscribe(handler:any,extra?,disposable?:Disposiable):any{throw 'abstract method'}
     $unsubscribe(handler:any):any{throw 'abstract method'}
-    $publish(evt?:any,useApply?:any,filter?:(extras)=>boolean){throw 'abstract method'}
-    $fulfill(evt?:any,useApply?:any,filter?:(extras)=>boolean){throw 'abstract method'}
+    $publish(evt?:any,useApply?:any,filter?:(extras)=>boolean):any{throw 'abstract method'}
+    $fulfill(evt?:any,useApply?:any,filter?:(extras)=>boolean):any{throw 'abstract method'}
     static isInstance(obj:any):boolean{
         return (obj && obj.$subscribe && obj.$unsubscribe && obj.$publish && obj.$fulfill)
     }
@@ -853,7 +883,7 @@ export class Schema{
     length?: Schema
     $dpath:DPath
     private '--dpath--'?: DPath
-    constructor(defaultValue,name?:string|Schema[],superSchema?:any,visitor?:any){
+    constructor(defaultValue,name?:string|Schema[],superSchema?:any){
         let type: ModelTypes,_name: string,_default: any
         let fn:Function, args : Schema[]
         if(defaultValue && (defaultValue.$modelType!==undefined || defaultValue.$fn)){
@@ -864,22 +894,28 @@ export class Schema{
             if(type===undefined && fn) type= ModelTypes.computed
             _name = name as string
         } else _default = defaultValue
-
-        const t = typeof _default
-        if(t==='function'){
-            if(is_array(name)) {
-                fn = defaultValue
-                args = name as Schema[]
-                type = ModelTypes.computed
-            } else if(!fn) {
-                _default = defaultValue
+        if(_default){
+            if(_default instanceof Date){
                 type = ModelTypes.value
-                _name = name as string
             }
-        }else if (t==='object' && type===undefined){
-            if(is_array(_default)) type = ModelTypes.array
-            else type = ModelTypes.object
-        } else type = ModelTypes.value
+            const t = typeof _default
+            if(t==='function'){
+                if(is_array(name)) {
+                    fn = defaultValue
+                    args = name as Schema[]
+                    type = ModelTypes.computed
+                } else if(!fn) {
+                    _default = defaultValue
+                    type = ModelTypes.value
+                    _name = name as string
+                }
+            }else if (t==='object' && type===undefined){
+                if(is_array(_default)) type = ModelTypes.array
+                else if(is_date(_default) || is_regex(_default)) type = ModelTypes.value
+                else type = ModelTypes.object
+            }else type = ModelTypes.value
+        }else type = ModelTypes.value
+         
 
         constant(false,this,{
             '$name': name,
@@ -917,20 +953,20 @@ export class Schema{
             }
         }
     }
-    $defineProp(name:string, propDefaultValue?:any,visitor?:any):Schema{
+    $defineProp(name:string, propDefaultValue?:any):Schema{
         if(this.$type !== ModelTypes.object){
             if(this.$type !== ModelTypes.value) throw new Exception('只有type==value的Schema才能调用该函数',{'schema':this})
             Object.defineProperty(this,'$type',{enumerable:false,configurable:false,writable:false,value:ModelTypes.object})
         } 
-        const propSchema = new Schema(propDefaultValue,name,this,visitor)
+        const propSchema = new Schema(propDefaultValue,name,this)
         Object.defineProperty(this,name,{configurable:true,writable:false,enumerable:true,value:propSchema})
         return propSchema
     }
 
-    $asArray(defaultItemValue?: any,visitor?:any):Schema{
-        if(this.$item) throw new Exception('$asArray只能调用一次',{'schema':this})
+    $asArray(defaultItemValue?: any):Schema{
+        if(this.$item) return this.$item
         Object.defineProperty(this,'$type',{enumerable:false,configurable:false,writable:false,value:ModelTypes.array})
-        let lengthSchema = new Schema(0,'length',this,visitor)
+        let lengthSchema = new Schema(0,'length',this)
         Object.defineProperty(this,'length',{enumerable:false,configurable:false,writable:false,value:lengthSchema})
         const itemSchema = new Schema(defaultItemValue,'[]',this)
         Object.defineProperty(this,'$item',{configurable:false,writable:false,enumerable:false,value:itemSchema})
@@ -964,7 +1000,7 @@ const schemaProxyTraps = {
 export type TObservable = {
     [index in number | string]: TObservable
 } & {
-    (value?: any,capture?:boolean,disposor?:any): any
+    (value?: any,handler?,disposor?): any
     '$Observable':Observable
     $observable:TObservable
 } & {
@@ -1009,6 +1045,25 @@ export class Observable extends Subscription{
     length?:Observable
     constructor(initial,schema:Schema,name:string|number,superOb:Observable){
         super()
+        let type :ModelTypes
+        if(schema) {
+            type = schema.$type
+        }else{
+            if(initial){
+                const t = typeof initial
+                if(t==='object'){
+                    if(is_date(initial) || is_regex(initial)) type = ModelTypes.value
+                    else if(is_array(initial)) type = ModelTypes.array
+                    else type = ModelTypes.object
+                }else type = ModelTypes.value
+            } else type = ModelTypes.value
+            
+        }
+        switch(type){
+            case ModelTypes.value:ObservableValue.call(this,initial,schema,name,superOb);break;
+            case ModelTypes.object:ObservableObject.call(this,initial,schema,name,superOb);break;
+            case ModelTypes.array:ObservableArray.call(this,initial,schema,name,superOb);break;
+        }
         
     }
     set(value,src?):TObservableChange{
@@ -1017,42 +1072,55 @@ export class Observable extends Subscription{
     get():any{
         return this.value
     }
-    update(src:any):TObservableChange{throw 'abstract method.'}
+    update(src:any,bubble?:boolean):TObservableChange{throw 'abstract method.'}
+    static isInstance(o:any):boolean{
+        return o && o.$observable && o.$Observable ===o
+    }
+    bubble(change:TObservableChange):boolean{
+        if(this.$publish(change,undefined,(extra)=>extra===true)===false) return false
+        if(change.cancel) return false
+        if(this.super) return this.super.bubble(change)
+    }
 }
 
-function initObservable(inital,schema:Schema,name:string,superOb:Observable){
+function init_observable(inital,schema:Schema,name:string,superOb:Observable){
     if(!this.$publish) Subscription.call(this)
     if(!name && schema) name = schema.$name
     this.name = name
-    this.schema = schema || new Schema(undefined,name,superOb?.schema)
+    this.schema = schema || new Schema(inital,name,superOb?.schema)
     this.super = superOb
     this.$observable = create_observable(this)
+    this.$Observable = this
     this.value = this.old = inital
 }
 
 export function ObservableValue(inital,schema:Schema,name:string,superOb:Observable){
     this.type = ModelTypes.value
-    initObservable.call(this,inital,schema,name,superOb)
+    init_observable.call(this,inital,schema,name,superOb)
     
     this.set = function(value ,src?){
         if(this.value===value) return this
-        sure_change.call(this,value,ObservableChangeTypes.setted)
+        this.value = value
+        sure_change(this,value,ObservableChangeTypes.setted)
         if(src!==undefined) this.update(src)
         return this.change
     }
-    this.update =function(src?):boolean{
+    this.update =function(src?,bubble?:boolean):boolean{
         if(!this.change) return false
-        const evt = this.change
+        const evt:TObservableChange = this.change
         this.change = null
         this.old = this.value
         evt.src = src
-        if(this.$publish(evt,this,(extras)=>extras===false)) return false
+        if(this.$publish(evt,(extra)=>extra!==true)===false) return false
+        if(bubble!==false && !evt.cancel) {
+            this.bubble(evt)
+        }
         return true
     }
+
 }
 
 export function ObservableObject(inital,schema:Schema,name:string,superOb:Observable){
-    
     this.get = function(){
         const result = {}
         const $observable = this.$observable
@@ -1061,9 +1129,7 @@ export function ObservableObject(inital,schema:Schema,name:string,superOb:Observ
         }
         return result
     }
-
     this.set = function(value,src?):TObservableChange{
-        
         const settingValue = value || {}
         this.value = value
         const ob = this.$observable
@@ -1078,7 +1144,7 @@ export function ObservableObject(inital,schema:Schema,name:string,superOb:Observ
             let propValue = settingValue[propname]
             const propChange = propOb.set(propValue)
             if(propChange){
-                const change = sure_change.call(this,value,ObservableChangeTypes.changed,propChange,propname)
+                const change = sure_change(this,value,ObservableChangeTypes.changed,propChange,propname)
                 hasChanges = true
             }
         }
@@ -1089,41 +1155,34 @@ export function ObservableObject(inital,schema:Schema,name:string,superOb:Observ
             return change
         }
     }
-    this.update = function(src?):boolean{
+    this.update = function(src?,bubble?:boolean):boolean{
         if(!this.change) return false
         const evt = this.change
         evt.src = src
         this.change = null
         this.old = this.value
-        if(this.$publish(evt,this,(extras)=>extras===false)) return false
+        if(this.$publish(evt,(extra)=>extra!==true)===false) return false
+        if(bubble!==false && !evt.cancel){
+            if(this.bubble(evt)===false) return false
+        }
+        if(evt.stop) return true
         const schema = this.schema
         const $observable = this.$observable
         for(const propname in schema) {
             const propOb = $observable[propname](Observable)
-            propOb.update(src)
+            propOb.update(src,false)
         }
         return true
     }
-    initObservable.call(this,inital,schema,name,superOb)
-    const Ob = this.$observable
-    if(!is_object(inital)){
-        inital = {}
+    init_observable.call(this,inital,schema,name,superOb)
+    const ob = this.$observable
+    const initialValue = inital || {}
+    for(const propname in this.schema) {
+        const propValue = initialValue[propname]
+        const propOb = new Observable(propValue,this.schema[propname],propname, this)
+        Object.defineProperty(ob,propname,{enumerable:true,configurable:true,writable:false,value:propOb.$observable})
     }
-    if(schema){
-        this.schema = schema
-        for(const propname in schema) {
-            const propValue = inital[propname]
-            const Ob = new Observable(propValue,schema[propname],propname, this)
-            Object.defineProperty(observable,propValue,{enumerable:true,configurable:true,writable:false,value:Ob.$observable})
-        }
-    }else{
-        schema = this.schema = new Schema(undefined,name,superOb?.schema)
-        for(const propname in inital) {
-            const propValue = inital[propname]
-            const propOb = new Observable(propValue,null,propname,this)
-            Object.defineProperty(Ob,propValue,{enumerable:true,configurable:true,writable:false,value:propOb.$observable})
-        }
-    }
+    
 
 }
 
@@ -1168,7 +1227,7 @@ export function ObservableArray(inital,schema:Schema,name:string,superOb:Observa
                 itemChange = itemOb.set(itemValue)
             }
             if(itemChange){
-                sure_change.call(this,value,ObservableChangeTypes.changed,itemChange,i)
+                sure_change(this,value,ObservableChangeTypes.changed,itemChange,i)
                 
                 hasChanges = true
             }
@@ -1188,7 +1247,7 @@ export function ObservableArray(inital,schema:Schema,name:string,superOb:Observa
         const evt = this.change 
         this.change = null
         evt.src = src
-        if(this.$publish(evt,this)===false) return false
+        if(this.$publish(evt)===false) return false
 
         const oldLength = this.length.old
         const newLength = this.length.value
@@ -1214,7 +1273,7 @@ export function ObservableArray(inital,schema:Schema,name:string,superOb:Observa
     }
     let initialValue = inital || []
     this.type = ModelTypes.array
-    initObservable.call(this,inital,schema,name,superOb)
+    init_observable.call(this,inital,schema,name,superOb)
     const ob = this.$observable
 
     make_arrayObservable(ob,this)
@@ -1234,43 +1293,39 @@ export function ObservableArray(inital,schema:Schema,name:string,superOb:Observa
 
 
 function create_observable(info:Observable):TObservable{
-    const ob = function(value:any,isCapture?:boolean,disposer?){
+    const ob = function(value:any,handler?,disposer?){
         if(value === undefined) return info.value
         if(value === Schema) return info.schema
         if(value === Observable) return info
         if(value === observable) return ob
 
-        if(value===NONE) value = undefined
-        else if(value.$Observable) value = value.$Observable.value
-        
-        if (isCapture===undefined){
-            info.set(value,disposer)
-        } else if(isCapture===true){
-            info.$subscribe(value,true,disposer)
-        } else if(isCapture===false){
-            info.$subscribe(value,false,disposer)
-        } else if(isCapture===null){
-            info.$unsubscribe(value)
-        } else throw new Exception('observable的第2个参数类型不正确，只能为undefined/null/true,false')
+        if(value===ATTACH) {
+            info.$subscribe(handler,info,disposer)
+        }else if(value===DETECH){
+            info.$unsubscribe(handler)
+        }else info.set(value,handler)
         return ob
 
     }
-    ob.toString = ()=>info.value===undefined || info.value=== null?'':info.value.toString()
+    Object.defineProperty(ob,'toString',{configurable:false,writable:true,enumerable:false,value:()=>info.value?info.value.toString():''})
     Object.defineProperty(ob,'$observable',{configurable:false,writable:false,enumerable:false,value:ob})
     Object.defineProperty(ob,'$Observable',{configurable:false,writable:false,enumerable:false,value:info})
+    Object.defineProperty(ob,'$subscribe',{configurable:false,writable:true,enumerable:false,value:(handler,extra,disposer)=>{info.$subscribe(handler,extra,disposer);return ob}})
+    Object.defineProperty(ob,'$unsubscribe',{configurable:false,writable:true,enumerable:false,value:(handler)=>{info.$subscribe(handler);return ob}})
+    Object.defineProperty(ob,'$update',{configurable:false,writable:true,enumerable:false,value:(src?)=>{info.update(src,true);return ob}})
     return ob as any
 }
 
-function sure_change(value,defaultType:ObservableChangeTypes,subChange?:TObservableChange,index?:any){
-    let change = this.change
-    if(this.change) {
-        change = this.change
+function sure_change(Ob:Observable,value,defaultType:ObservableChangeTypes,subChange?:TObservableChange,index?:any){
+    let change = Ob.change
+    if(Ob.change) {
+        change = Ob.change
     }else {
-         change =  this.change = {
+         change =  Ob.change = {
             type:defaultType,
-            old: this.old,
+            old: Ob.old,
             value:value,
-            sender: this
+            sender: Ob.$observable
          }
     }
     change.value = value
@@ -1278,6 +1333,7 @@ function sure_change(value,defaultType:ObservableChangeTypes,subChange?:TObserva
         const changes = change.changes || (change.changes={})
         changes[index] = subChange
     }
+    
     return change
 }
 
@@ -1367,7 +1423,20 @@ export enum ObservableModes{
     delay,
     immediately
 }
-function observable(initial?){
-
+export function observable(initial?,name?:string){
+    let schema :Schema
+    if (initial instanceof Schema){
+        schema = initial
+        initial = schema.$default
+    }else if (initial instanceof Observable) {
+        schema = initial.schema
+        initial = initial.get()
+    } else if (observable.isInstance(initial)){
+        schema = initial.$Observable.schema
+        initial = initial.$Observable.get()
+    }
+    return new Observable(initial,schema,name,null).$observable
 }
+observable.isInstance = function(o:any):boolean{return false}
+Object.defineProperty(observable,'isInstance',{enumerable:false,configurable:false,writable:false,value:(o:any):boolean=>o && o.$Observable && o.$observable===o })
 observable.mode = ObservableModes.delay

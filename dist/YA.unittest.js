@@ -316,11 +316,13 @@ var __extends = (this && this.__extends) || (function () {
                 var tm = TestMethod.fetch(test);
                 if (meta(tm, desp) !== false)
                     return addTodos(tm);
+                return doTestImmediately;
             }
             else if (t === 'object') {
                 var tc = TestClass.fetch(test);
                 if (meta(tc, desp) !== false)
                     return addTodos(tc);
+                doTestImmediately;
             }
             throw '错误的参数';
         }
@@ -358,20 +360,12 @@ var __extends = (this && this.__extends) || (function () {
             }, 0);
         }
         todos.push(executable);
+        return doTestImmediately;
     }
-    var tests = {
-        testA: function (ASSERTS) {
-            var a = 1;
-            var b = 2;
-            ASSERTS({
-                'a与b要相等': function () { return a === b; }
-            });
-            var c = 3;
-            ASSERTS({
-                'c与a要相等': function () { return c == a; }
-            });
-        }
-    };
+    function doTestImmediately() {
+        var executable;
+        while (executable = todos.shift())
+            executable.execute(Logger.default);
+    }
 });
-//testable(true,tests)
 //# sourceMappingURL=YA.unittest.js.map

@@ -1,7 +1,7 @@
 import {testable} from '../../YA.unittest'
 import {DPath} from '../../YA.core'
 
-testable('core.dpath',{
+export default testable('core.dpath',{
     '基本用法':(ASSERT)=>{
         const data = {
             user:{

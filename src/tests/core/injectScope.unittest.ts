@@ -1,7 +1,7 @@
 import {testable} from '../../YA.unittest'
 import {injectable,InjectScope} from '../../YA.core'
 
-testable('core.injectable',{
+export default testable('core.injectable',{
     '注册与获取':(ASSERT)=>{
         function ClassA(age){this.age = age}
         // 创建一个注入容器

@@ -2,6 +2,8 @@ export declare function is_string(obj: any): boolean;
 export declare function is_bool(obj: any): boolean;
 export declare function is_number(obj: any): boolean;
 export declare function is_assoc(obj: any): boolean;
+export declare function is_date(obj: any): boolean;
+export declare function is_regex(obj: any): boolean;
 export declare function is_object(obj: any): boolean;
 export declare function is_array(obj: any): boolean;
 export declare function is_empty(obj: any): boolean;
@@ -97,13 +99,20 @@ export declare function constant(enumerable?: boolean, target?: any, name?: any,
 export declare function nop(): void;
 export declare class Exception extends Error {
     constructor(msg: any, detail?: any, silence?: any);
+    static printError: boolean;
 }
 export declare function rid(prefix?: string): string;
 export declare const NONE: any;
+export declare const ATTACH: any;
+export declare const DETECH: any;
 export declare const REMOVE: any;
+export declare const UPDATE: any;
 export declare const USEAPPLY: any;
 export declare function nextTick(handler: any, append?: any): number;
 export declare function disposable(target: any): any;
+export declare namespace disposable {
+    var isInstance: typeof Disposiable.isInstance;
+}
 export declare class Disposiable {
     $disposed?: boolean;
     $dispose(callback?: any): void;
@@ -117,8 +126,8 @@ export declare namespace subscribable {
 export declare class Subscription {
     $subscribe(handler: any, extra?: any, disposable?: Disposiable): any;
     $unsubscribe(handler: any): any;
-    $publish(evt?: any, useApply?: any, filter?: (extras: any) => boolean): void;
-    $fulfill(evt?: any, useApply?: any, filter?: (extras: any) => boolean): void;
+    $publish(evt?: any, useApply?: any, filter?: (extras: any) => boolean): any;
+    $fulfill(evt?: any, useApply?: any, filter?: (extras: any) => boolean): any;
     static isInstance(obj: any): boolean;
     static REMOVE: any;
     static USEAPPLY: any;
@@ -179,15 +188,15 @@ export declare class Schema {
     length?: Schema;
     $dpath: DPath;
     private '--dpath--'?;
-    constructor(defaultValue: any, name?: string | Schema[], superSchema?: any, visitor?: any);
-    $defineProp(name: string, propDefaultValue?: any, visitor?: any): Schema;
-    $asArray(defaultItemValue?: any, visitor?: any): Schema;
+    constructor(defaultValue: any, name?: string | Schema[], superSchema?: any);
+    $defineProp(name: string, propDefaultValue?: any): Schema;
+    $asArray(defaultItemValue?: any): Schema;
     static proxy(target?: any): any;
 }
 export declare type TObservable = {
     [index in number | string]: TObservable;
 } & {
-    (value?: any, capture?: boolean, disposor?: any): any;
+    (value?: any, handler?: any, disposor?: any): any;
     '$Observable': Observable;
     $observable: TObservable;
 } & {
@@ -231,7 +240,9 @@ export declare class Observable extends Subscription {
     constructor(initial: any, schema: Schema, name: string | number, superOb: Observable);
     set(value: any, src?: any): TObservableChange;
     get(): any;
-    update(src: any): TObservableChange;
+    update(src: any, bubble?: boolean): TObservableChange;
+    static isInstance(o: any): boolean;
+    bubble(change: TObservableChange): boolean;
 }
 export declare function ObservableValue(inital: any, schema: Schema, name: string, superOb: Observable): void;
 export declare function ObservableObject(inital: any, schema: Schema, name: string, superOb: Observable): void;
@@ -239,5 +250,10 @@ export declare function ObservableArray(inital: any, schema: Schema, name: strin
 export declare enum ObservableModes {
     delay = 0,
     immediately = 1
+}
+export declare function observable(initial?: any, name?: string): TObservable;
+export declare namespace observable {
+    var isInstance: (o: any) => boolean;
+    var mode: ObservableModes;
 }
 export {};

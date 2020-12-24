@@ -1,6 +1,6 @@
 import {testable} from '../../YA.unittest'
 import {Schema,ModelTypes} from '../../YA.core'
-testable('core.Schema',{
+export default testable('core.Schema',{
     '基础用法':(ASSERT)=>{
         const schemaValue = new Schema(12)
         ASSERT({

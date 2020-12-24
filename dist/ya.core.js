@@ -50,6 +50,14 @@ var __decorate = (this && this.__decorate) || function (decorators, target, key,
         return Object.prototype.toString.call(obj) === "[object Object]";
     }
     exports.is_assoc = is_assoc;
+    function is_date(obj) {
+        return obj && Object.prototype.toString.call(obj) === "[object Date]";
+    }
+    exports.is_date = is_date;
+    function is_regex(obj) {
+        return obj && Object.prototype.toString.call(obj) === "[object RegExp]";
+    }
+    exports.is_regex = is_regex;
     function is_object(obj) {
         if (!obj)
             return false;
@@ -210,8 +218,14 @@ var __decorate = (this && this.__decorate) || function (decorators, target, key,
     ///////////////////////////////////////
     // 对象处理
     function clone(obj, _clones) {
+        if (!obj)
+            return obj;
         var t = typeof obj;
         if (t === 'object') {
+            if (is_date(obj))
+                return new Date(obj.valueOf());
+            else if (is_regex(obj))
+                return obj;
             if (!_clones)
                 _clones = [];
             else
@@ -405,19 +419,18 @@ var __decorate = (this && this.__decorate) || function (decorators, target, key,
             }
             return target;
         }
-        if (typeof name === 'object') {
-            if (is_array(name)) {
-                for (var _i = 0, name_2 = name; _i < name_2.length; _i++) {
-                    var membername = name_2[_i];
-                    desc.value = target[membername];
-                    Object.defineProperty(target, membername, desc);
-                }
+        if (is_array(name)) {
+            for (var _i = 0, name_2 = name; _i < name_2.length; _i++) {
+                var membername = name_2[_i];
+                desc.value = target[membername];
+                Object.defineProperty(target, membername, desc);
             }
-            else {
-                for (var n in name) {
-                    desc.value = name[n];
-                    Object.defineProperty(target, n, desc);
-                }
+            return target;
+        }
+        else if (is_object(name)) {
+            for (var n in name) {
+                desc.value = name[n];
+                Object.defineProperty(target, n, desc);
             }
             return target;
         }
@@ -451,13 +464,15 @@ var __decorate = (this && this.__decorate) || function (decorators, target, key,
         __extends(Exception, _super);
         function Exception(msg, detail, silence) {
             var _this = this;
-            console.error(msg, detail);
+            if (Exception.printError)
+                console.error(msg, detail);
             _this = _super.call(this, msg) || this;
             if (detail)
                 for (var n in detail)
                     _this[n] = detail[n];
             return _this;
         }
+        Exception.printError = false;
         return Exception;
     }(Error));
     exports.Exception = Exception;
@@ -484,7 +499,19 @@ var __decorate = (this && this.__decorate) || function (decorators, target, key,
         get: function () { return undefined; },
         set: function () { return this; }
     });
+    exports.ATTACH = new Proxy(function () { return this; }, {
+        get: function () { return undefined; },
+        set: function () { return this; }
+    });
+    exports.DETECH = new Proxy(function () { return this; }, {
+        get: function () { return undefined; },
+        set: function () { return this; }
+    });
     exports.REMOVE = new Proxy(function () { return this; }, {
+        get: function () { return undefined; },
+        set: function () { return this; }
+    });
+    exports.UPDATE = new Proxy(function () { return this; }, {
         get: function () { return undefined; },
         set: function () { return this; }
     });
@@ -560,6 +587,8 @@ var __decorate = (this && this.__decorate) || function (decorators, target, key,
     }());
     exports.Disposiable = Disposiable;
     disposable(Disposiable.prototype);
+    disposable.isInstance = Disposiable.isInstance;
+    Object.defineProperty(disposable, 'isInstance', { configurable: false, writable: false, enumerable: false, value: Disposiable.isInstance });
     //////////////////////////////////////////////////////////////
     // Subscribe/Publish
     function subscribable(target) {
@@ -625,7 +654,7 @@ var __decorate = (this && this.__decorate) || function (decorators, target, key,
                     useApply = true;
                 }
                 else {
-                    if (useApply && useApply.call && useApply.apply && filter === undefined) {
+                    if (filter === undefined && useApply instanceof Function) {
                         filter = useApply;
                         arg1 = undefined;
                     }
@@ -666,7 +695,7 @@ var __decorate = (this && this.__decorate) || function (decorators, target, key,
                     useApply = true;
                 }
                 else {
-                    if (useApply && useApply.call && useApply.apply && filter === undefined) {
+                    if (filter === undefined && useApply instanceof Function) {
                         filter = useApply;
                         arg1 = undefined;
                     }
@@ -971,7 +1000,7 @@ var __decorate = (this && this.__decorate) || function (decorators, target, key,
         ModelTypes[ModelTypes["computed"] = 4] = "computed";
     })(ModelTypes = exports.ModelTypes || (exports.ModelTypes = {}));
     var Schema = /** @class */ (function () {
-        function Schema(defaultValue, name, superSchema, visitor) {
+        function Schema(defaultValue, name, superSchema) {
             var type, _name, _default;
             var fn, args;
             if (defaultValue && (defaultValue.$modelType !== undefined || defaultValue.$fn)) {
@@ -985,24 +1014,33 @@ var __decorate = (this && this.__decorate) || function (decorators, target, key,
             }
             else
                 _default = defaultValue;
-            var t = typeof _default;
-            if (t === 'function') {
-                if (is_array(name)) {
-                    fn = defaultValue;
-                    args = name;
-                    type = ModelTypes.computed;
-                }
-                else if (!fn) {
-                    _default = defaultValue;
+            if (_default) {
+                if (_default instanceof Date) {
                     type = ModelTypes.value;
-                    _name = name;
                 }
-            }
-            else if (t === 'object' && type === undefined) {
-                if (is_array(_default))
-                    type = ModelTypes.array;
+                var t = typeof _default;
+                if (t === 'function') {
+                    if (is_array(name)) {
+                        fn = defaultValue;
+                        args = name;
+                        type = ModelTypes.computed;
+                    }
+                    else if (!fn) {
+                        _default = defaultValue;
+                        type = ModelTypes.value;
+                        _name = name;
+                    }
+                }
+                else if (t === 'object' && type === undefined) {
+                    if (is_array(_default))
+                        type = ModelTypes.array;
+                    else if (is_date(_default) || is_regex(_default))
+                        type = ModelTypes.value;
+                    else
+                        type = ModelTypes.object;
+                }
                 else
-                    type = ModelTypes.object;
+                    type = ModelTypes.value;
             }
             else
                 type = ModelTypes.value;
@@ -1045,21 +1083,21 @@ var __decorate = (this && this.__decorate) || function (decorators, target, key,
             }
         }
         Schema_1 = Schema;
-        Schema.prototype.$defineProp = function (name, propDefaultValue, visitor) {
+        Schema.prototype.$defineProp = function (name, propDefaultValue) {
             if (this.$type !== ModelTypes.object) {
                 if (this.$type !== ModelTypes.value)
                     throw new Exception('只有type==value的Schema才能调用该函数', { 'schema': this });
                 Object.defineProperty(this, '$type', { enumerable: false, configurable: false, writable: false, value: ModelTypes.object });
             }
-            var propSchema = new Schema_1(propDefaultValue, name, this, visitor);
+            var propSchema = new Schema_1(propDefaultValue, name, this);
             Object.defineProperty(this, name, { configurable: true, writable: false, enumerable: true, value: propSchema });
             return propSchema;
         };
-        Schema.prototype.$asArray = function (defaultItemValue, visitor) {
+        Schema.prototype.$asArray = function (defaultItemValue) {
             if (this.$item)
-                throw new Exception('$asArray只能调用一次', { 'schema': this });
+                return this.$item;
             Object.defineProperty(this, '$type', { enumerable: false, configurable: false, writable: false, value: ModelTypes.array });
-            var lengthSchema = new Schema_1(0, 'length', this, visitor);
+            var lengthSchema = new Schema_1(0, 'length', this);
             Object.defineProperty(this, 'length', { enumerable: false, configurable: false, writable: false, value: lengthSchema });
             var itemSchema = new Schema_1(defaultItemValue, '[]', this);
             Object.defineProperty(this, '$item', { configurable: false, writable: false, enumerable: false, value: itemSchema });
@@ -1102,7 +1140,40 @@ var __decorate = (this && this.__decorate) || function (decorators, target, key,
     var Observable = /** @class */ (function (_super) {
         __extends(Observable, _super);
         function Observable(initial, schema, name, superOb) {
-            return _super.call(this) || this;
+            var _this = _super.call(this) || this;
+            var type;
+            if (schema) {
+                type = schema.$type;
+            }
+            else {
+                if (initial) {
+                    var t = typeof initial;
+                    if (t === 'object') {
+                        if (is_date(initial) || is_regex(initial))
+                            type = ModelTypes.value;
+                        else if (is_array(initial))
+                            type = ModelTypes.array;
+                        else
+                            type = ModelTypes.object;
+                    }
+                    else
+                        type = ModelTypes.value;
+                }
+                else
+                    type = ModelTypes.value;
+            }
+            switch (type) {
+                case ModelTypes.value:
+                    ObservableValue.call(_this, initial, schema, name, superOb);
+                    break;
+                case ModelTypes.object:
+                    ObservableObject.call(_this, initial, schema, name, superOb);
+                    break;
+                case ModelTypes.array:
+                    ObservableArray.call(_this, initial, schema, name, superOb);
+                    break;
+            }
+            return _this;
         }
         Observable.prototype.set = function (value, src) {
             throw 'abstract method.';
@@ -1110,48 +1181,63 @@ var __decorate = (this && this.__decorate) || function (decorators, target, key,
         Observable.prototype.get = function () {
             return this.value;
         };
-        Observable.prototype.update = function (src) { throw 'abstract method.'; };
+        Observable.prototype.update = function (src, bubble) { throw 'abstract method.'; };
+        Observable.isInstance = function (o) {
+            return o && o.$observable && o.$Observable === o;
+        };
+        Observable.prototype.bubble = function (change) {
+            if (this.$publish(change, undefined, function (extra) { return extra === true; }) === false)
+                return false;
+            if (change.cancel)
+                return false;
+            if (this.super)
+                return this.super.bubble(change);
+        };
         return Observable;
     }(Subscription));
     exports.Observable = Observable;
-    function initObservable(inital, schema, name, superOb) {
+    function init_observable(inital, schema, name, superOb) {
         var _a;
         if (!this.$publish)
             Subscription.call(this);
         if (!name && schema)
             name = schema.$name;
         this.name = name;
-        this.schema = schema || new Schema(undefined, name, (_a = superOb) === null || _a === void 0 ? void 0 : _a.schema);
+        this.schema = schema || new Schema(inital, name, (_a = superOb) === null || _a === void 0 ? void 0 : _a.schema);
         this.super = superOb;
         this.$observable = create_observable(this);
+        this.$Observable = this;
         this.value = this.old = inital;
     }
     function ObservableValue(inital, schema, name, superOb) {
         this.type = ModelTypes.value;
-        initObservable.call(this, inital, schema, name, superOb);
+        init_observable.call(this, inital, schema, name, superOb);
         this.set = function (value, src) {
             if (this.value === value)
                 return this;
-            sure_change.call(this, value, ObservableChangeTypes.setted);
+            this.value = value;
+            sure_change(this, value, ObservableChangeTypes.setted);
             if (src !== undefined)
                 this.update(src);
             return this.change;
         };
-        this.update = function (src) {
+        this.update = function (src, bubble) {
             if (!this.change)
                 return false;
             var evt = this.change;
             this.change = null;
             this.old = this.value;
             evt.src = src;
-            if (this.$publish(evt, this, function (extras) { return extras === false; }))
+            if (this.$publish(evt, function (extra) { return extra !== true; }) === false)
                 return false;
+            if (bubble !== false && !evt.cancel) {
+                this.bubble(evt);
+            }
             return true;
         };
     }
     exports.ObservableValue = ObservableValue;
     function ObservableObject(inital, schema, name, superOb) {
-        var _a;
         this.get = function () {
             var result = {};
             var $observable = this.$observable;
@@ -1174,7 +1260,7 @@ var __decorate = (this && this.__decorate) || function (decorators, target, key,
                 var propValue = settingValue[propname];
                 var propChange = propOb.set(propValue);
                 if (propChange) {
-                    var change = sure_change.call(this, value, ObservableChangeTypes.changed, propChange, propname);
+                    var change = sure_change(this, value, ObservableChangeTypes.changed, propChange, propname);
                     hasChanges = true;
                 }
             }
@@ -1186,43 +1272,36 @@ var __decorate = (this && this.__decorate) || function (decorators, target, key,
                 return change;
             }
         };
-        this.update = function (src) {
+        this.update = function (src, bubble) {
             if (!this.change)
                 return false;
             var evt = this.change;
             evt.src = src;
             this.change = null;
             this.old = this.value;
-            if (this.$publish(evt, this, function (extras) { return extras === false; }))
+            if (this.$publish(evt, function (extra) { return extra !== true; }) === false)
                 return false;
+            if (bubble !== false && !evt.cancel) {
+                if (this.bubble(evt) === false)
+                    return false;
+            }
+            if (evt.stop)
+                return true;
             var schema = this.schema;
             var $observable = this.$observable;
             for (var propname in schema) {
                 var propOb = $observable[propname](Observable);
-                propOb.update(src);
+                propOb.update(src, false);
             }
             return true;
         };
-        initObservable.call(this, inital, schema, name, superOb);
-        var Ob = this.$observable;
-        if (!is_object(inital)) {
-            inital = {};
-        }
-        if (schema) {
-            this.schema = schema;
-            for (var propname in schema) {
-                var propValue = inital[propname];
-                var Ob_1 = new Observable(propValue, schema[propname], propname, this);
-                Object.defineProperty(observable, propValue, { enumerable: true, configurable: true, writable: false, value: Ob_1.$observable });
-            }
-        }
-        else {
-            schema = this.schema = new Schema(undefined, name, (_a = superOb) === null || _a === void 0 ? void 0 : _a.schema);
-            for (var propname in inital) {
-                var propValue = inital[propname];
-                var propOb = new Observable(propValue, null, propname, this);
-                Object.defineProperty(Ob, propValue, { enumerable: true, configurable: true, writable: false, value: propOb.$observable });
-            }
+        init_observable.call(this, inital, schema, name, superOb);
+        var ob = this.$observable;
+        var initialValue = inital || {};
+        for (var propname in this.schema) {
+            var propValue = initialValue[propname];
+            var propOb = new Observable(propValue, this.schema[propname], propname, this);
+            Object.defineProperty(ob, propname, { enumerable: true, configurable: true, writable: false, value: propOb.$observable });
         }
     }
     exports.ObservableObject = ObservableObject;
@@ -1267,7 +1346,7 @@ var __decorate = (this && this.__decorate) || function (decorators, target, key,
                     itemChange = itemOb.set(itemValue);
                 }
                 if (itemChange) {
-                    sure_change.call(this, value, ObservableChangeTypes.changed, itemChange, i);
+                    sure_change(this, value, ObservableChangeTypes.changed, itemChange, i);
                     hasChanges = true;
                 }
             }
@@ -1286,7 +1365,7 @@ var __decorate = (this && this.__decorate) || function (decorators, target, key,
             var evt = this.change;
             this.change = null;
             evt.src = src;
-            if (this.$publish(evt, this) === false)
+            if (this.$publish(evt) === false)
                 return false;
             var oldLength = this.length.old;
             var newLength = this.length.value;
@@ -1314,7 +1393,7 @@ var __decorate = (this && this.__decorate) || function (decorators, target, key,
         };
         var initialValue = inital || [];
         this.type = ModelTypes.array;
-        initObservable.call(this, inital, schema, name, superOb);
+        init_observable.call(this, inital, schema, name, superOb);
         var ob = this.$observable;
         make_arrayObservable(ob, this);
         make_arrayLength(initialValue.length, ob, this);
@@ -1330,7 +1409,7 @@ var __decorate = (this && this.__decorate) || function (decorators, target, key,
     }
     exports.ObservableArray = ObservableArray;
     function create_observable(info) {
-        var ob = function (value, isCapture, disposer) {
+        var ob = function (value, handler, disposer) {
             if (value === undefined)
                 return info.value;
             if (value === Schema)
@@ -1339,42 +1418,35 @@ var __decorate = (this && this.__decorate) || function (decorators, target, key,
                 return info;
             if (value === observable)
                 return ob;
-            if (value === exports.NONE)
-                value = undefined;
-            else if (value.$Observable)
-                value = value.$Observable.value;
-            if (isCapture === undefined) {
-                info.set(value, disposer);
+            if (value === exports.ATTACH) {
+                info.$subscribe(handler, info, disposer);
             }
-            else if (isCapture === true) {
-                info.$subscribe(value, true, disposer);
-            }
-            else if (isCapture === false) {
-                info.$subscribe(value, false, disposer);
-            }
-            else if (isCapture === null) {
-                info.$unsubscribe(value);
+            else if (value === exports.DETECH) {
+                info.$unsubscribe(handler);
             }
             else
-                throw new Exception('observable的第2个参数类型不正确，只能为undefined/null/true,false');
+                info.set(value, handler);
             return ob;
         };
-        ob.toString = function () { return info.value === undefined || info.value === null ? '' : info.value.toString(); };
+        Object.defineProperty(ob, 'toString', { configurable: false, writable: true, enumerable: false, value: function () { return info.value ? info.value.toString() : ''; } });
         Object.defineProperty(ob, '$observable', { configurable: false, writable: false, enumerable: false, value: ob });
         Object.defineProperty(ob, '$Observable', { configurable: false, writable: false, enumerable: false, value: info });
+        Object.defineProperty(ob, '$subscribe', { configurable: false, writable: true, enumerable: false, value: function (handler, extra, disposer) { info.$subscribe(handler, extra, disposer); return ob; } });
+        Object.defineProperty(ob, '$unsubscribe', { configurable: false, writable: true, enumerable: false, value: function (handler) { info.$subscribe(handler); return ob; } });
+        Object.defineProperty(ob, '$update', { configurable: false, writable: true, enumerable: false, value: function (src) { info.update(src, true); return ob; } });
         return ob;
     }
-    function sure_change(value, defaultType, subChange, index) {
-        var change = this.change;
-        if (this.change) {
-            change = this.change;
+    function sure_change(Ob, value, defaultType, subChange, index) {
+        var change = Ob.change;
+        if (Ob.change) {
+            change = Ob.change;
         }
         else {
-            change = this.change = {
+            change = Ob.change = {
                 type: defaultType,
-                old: this.old,
+                old: Ob.old,
                 value: value,
-                sender: this
+                sender: Ob.$observable
             };
         }
         change.value = value;
@@ -1469,8 +1541,25 @@ var __decorate = (this && this.__decorate) || function (decorators, target, key,
         ObservableModes[ObservableModes["delay"] = 0] = "delay";
         ObservableModes[ObservableModes["immediately"] = 1] = "immediately";
     })(ObservableModes = exports.ObservableModes || (exports.ObservableModes = {}));
-    function observable(initial) {
+    function observable(initial, name) {
+        var schema;
+        if (initial instanceof Schema) {
+            schema = initial;
+            initial = schema.$default;
+        }
+        else if (initial instanceof Observable) {
+            schema = initial.schema;
+            initial = initial.get();
+        }
+        else if (observable.isInstance(initial)) {
+            schema = initial.$Observable.schema;
+            initial = initial.$Observable.get();
+        }
+        return new Observable(initial, schema, name, null).$observable;
     }
+    exports.observable = observable;
+    observable.isInstance = function (o) { return false; };
+    Object.defineProperty(observable, 'isInstance', { enumerable: false, configurable: false, writable: false, value: function (o) { return o && o.$Observable && o.$observable === o; } });
     observable.mode = ObservableModes.delay;
 });
 //# sourceMappingURL=YA.core.js.map

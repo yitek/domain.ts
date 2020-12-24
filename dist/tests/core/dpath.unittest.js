@@ -11,7 +11,7 @@
     Object.defineProperty(exports, "__esModule", { value: true });
     var YA_unittest_1 = require("../../YA.unittest");
     var YA_core_1 = require("../../YA.core");
-    YA_unittest_1.testable('core.dpath', {
+    exports.default = YA_unittest_1.testable('core.dpath', {
         '基本用法': function (ASSERT) {
             var data = {
                 user: {

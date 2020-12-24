@@ -1,7 +1,7 @@
 import {testable} from '../../YA.unittest'
 import {Disposiable, subscribable, Subscription} from '../../YA.core'
 
-testable('core.subscribable',{
+export default testable('core.subscribable',{
     '基本用法':(ASSERT)=>{
         const target:any = {}
         subscribable(target)
