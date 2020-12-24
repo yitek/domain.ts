@@ -11,7 +11,6 @@
     Object.defineProperty(exports, "__esModule", { value: true });
     var YA_unittest_1 = require("../../YA.unittest");
     var YA_core_1 = require("../../YA.core");
-    //
     YA_unittest_1.testable('core.subscribable', {
         '基本用法': function (ASSERT) {
             var target = {};
@@ -40,7 +39,6 @@
                 listenerEventArg3 = evt3;
             }
             target.$subscribe(listener);
-            debugger;
             target.$publish(5, 3);
             ASSERT({
                 '$publish可以通过第二个参数来传递第二个参数': function () { return listenerEventArg1 === 5 && listenerEventArg2 === 3; }

@@ -420,6 +420,30 @@ export const USEAPPLY = new Proxy(function(){return this},{
     set(){return this}
 })
 
+let nextTickHandlers = []
+let nextTickTimer :number
+export function nextTick(handler,append?) {
+    if(append===false){
+        let c = 0
+        for(let i = 0,j=nextTickHandlers.length;i<j;i++) {
+            const existed = nextTickHandlers.shift()
+            if(existed!==handler) nextTickHandlers.push(existed)
+            else c++
+        }
+        return c
+    }
+    nextTickHandlers.push(handler)
+    if(!nextTickTimer) nextTickTimer = setTimeout(() => {
+        const handlers = nextTickHandlers
+        nextTickHandlers = []
+        for(let i = 0,j=handlers.length;i<j;i++) {
+            const handler = handlers.shift()
+            handler()
+        }
+        if(nextTickHandlers.length===0) nextTickTimer = 0
+    }, 0);
+}
+
 
 const dispose = function(handler?){
     if(handler===undefined){
@@ -469,7 +493,12 @@ export function subscribable(target){
             const filter = handlers['--fulfill-filter']
             if(filter && !filter(extras)) return this
             if(extras===undefined) extras = this
-            handlers['--fulfill-use-apply--']?handler.apply(extras,handlers['--fulfill-value--']):handler.call(extras,handlers['--fulfill-value--'])
+            if(handlers['--fulfill-use-apply--'])
+                handler.apply(extras,handlers['--fulfill-value--'])
+            else if (handlers['--fulfill-value1--']===undefined)
+                handler.call(extras,handlers['--fulfill-value--'])
+            else 
+                handler.call(extras,handlers['--fulfill-value--'],handlers['--fulfill-value1--'])
             return this
         }
         const callbacker = {
@@ -938,16 +967,31 @@ export type TObservable = {
     (value?: any,capture?:boolean,disposor?:any): any
     '$Observable':Observable
     $observable:TObservable
+} & {
+    length?:TObservable
+    push?:(...args)=>TObservable
+    pop?:(token?)=>any
+    unshift?:(...args)=>TObservable
+    shift?:(token?)=>any
+    remove?:(at:number)=>any
+    insert?:(at:number)=>TObservable
 }
 
-export type TObservableEvent = {
+export enum ObservableChangeTypes{
+    nochanges,
+    setted,
+    changed,
+    appended,
+    removed
+}
+
+export type TObservableChange = {
+    type:ObservableChangeTypes
     value?:any
     old?:any
     src?:any
     sender?:TObservable
-    removes?:TObservable[]
-    appends?:TObservable[]
-    removed?:boolean
+    changes? :{[index:string]:TObservableChange}
     cancel?:boolean
     stop?:boolean
 }
@@ -957,150 +1001,134 @@ export class Observable extends Subscription{
     name:string
     old:any
     value:any
+    change:TObservableChange
     schema: Schema
     super?:Observable
-    deps?:Observable[]
-    dep_handler?:(evt:TObservableEvent)=>any
     $observable:TObservable
-    listeners?:{(evt:TObservableEvent):any}[]
-    captures?:{(evt:TObservableEvent):any}[]
-    hasChanges?:number
+
     length?:Observable
-    constructor(initial,schema:Schema,name:string,superOb:Observable){
+    constructor(initial,schema:Schema,name:string|number,superOb:Observable){
         super()
-        if(!schema) schema = new Schema(initial)
-        if(name===undefined) name = schema.$name
-        this.name = name
-        this.super = superOb
-        this.hasChanges = 0
+        
     }
-    set(value,src?):Observable{
-        if(this.value===value) return this
-        if(src!==undefined) this.update(src)
-        return this
+    set(value,src?):TObservableChange{
+        throw 'abstract method.'
     }
     get():any{
         return this.value
     }
-    update(src:any):any{
-        if(this.value===this.old) return
-        const evt:TObservableEvent = {
-            value:this.value,
-            old:this.old,
-            sender : this.$observable,
-            src: src
-        }
-        this.$publish(evt,false,(extras)=>extras===false)
-        if(evt.cancel) return false
-        return true
-    }
+    update(src:any):TObservableChange{throw 'abstract method.'}
 }
 
-export function ObservableValue(inital,schema:Schema,name:string,superOb:Observable){
-    if(!this.update && !this.set) for(const n in Observable.prototype) this[n] = Observable.prototype[n]
-    this.type = ModelTypes.value
+function initObservable(inital,schema:Schema,name:string,superOb:Observable){
+    if(!this.$publish) Subscription.call(this)
     if(!name && schema) name = schema.$name
     this.name = name
     this.schema = schema || new Schema(undefined,name,superOb?.schema)
     this.super = superOb
-    this.value = this.old = inital 
+    this.$observable = create_observable(this)
+    this.value = this.old = inital
+}
+
+export function ObservableValue(inital,schema:Schema,name:string,superOb:Observable){
+    this.type = ModelTypes.value
+    initObservable.call(this,inital,schema,name,superOb)
+    
+    this.set = function(value ,src?){
+        if(this.value===value) return this
+        sure_change.call(this,value,ObservableChangeTypes.setted)
+        if(src!==undefined) this.update(src)
+        return this.change
+    }
+    this.update =function(src?):boolean{
+        if(!this.change) return false
+        const evt = this.change
+        this.change = null
+        this.old = this.value
+        evt.src = src
+        if(this.$publish(evt,this,(extras)=>extras===false)) return false
+        return true
+    }
 }
 
 export function ObservableObject(inital,schema:Schema,name:string,superOb:Observable){
-    if(!Subscription.isInstance(this)) subscribable(this)
-    this.get = function(){ return this.value }
-    this._typeValue = (obj)=>is_object(obj)?obj:{}
-    this.set = function(value,src?){
-        if(!value) value = {}
-        if(this.super && this.name && value!==this.value) this.super.value[this.name] = value
+    
+    this.get = function(){
+        const result = {}
+        const $observable = this.$observable
+        for(const propname in this.schema) {
+            result[propname] = $observable[propname]()
+        }
+        return result
+    }
+
+    this.set = function(value,src?):TObservableChange{
+        
+        const settingValue = value || {}
         this.value = value
         const ob = this.$observable
+        const schema = this.schema
+
         const mod = observable.mode
         observable.mode = ObservableModes.delay
-        
-        for(const propname in ob) {
+        let hasChanges = false
+        for(const propname in schema) {
             const prop = ob[propname]
-            let propValue = value[propname]
-            if(propValue===undefined) propValue = NONE
-            prop(propValue)
+            const propOb = prop(Observable)
+            let propValue = settingValue[propname]
+            const propChange = propOb.set(propValue)
+            if(propChange){
+                const change = sure_change.call(this,value,ObservableChangeTypes.changed,propChange,propname)
+                hasChanges = true
+            }
         }
         observable.mode = mod
-        if (src!==undefined) this.update(src)
-        return this as any
+        if(hasChanges){
+            const change = this.change
+            if (src!==undefined ) this.update(src)
+            return change
+        }
     }
-
-    this.update = function(src?){
-        let hasSelfChanges = false
-        let evt:TObservableEvent,old = this.old,value=this.value
-        let cancelBubble = false
-        if(old !== value){
-            this.old= value
-            evt = {
-                value:value,
-                old:old,
-                sender : this.$observable,
-                src: src
-            }
-            if(this.$publish(evt,false,(extras)=>extras===false)===false) return false
-            // 不再向上传播
-            if(evt.cancel) cancelBubble = true
-            if(evt.stop) return true
-            hasSelfChanges = true
+    this.update = function(src?):boolean{
+        if(!this.change) return false
+        const evt = this.change
+        evt.src = src
+        this.change = null
+        this.old = this.value
+        if(this.$publish(evt,this,(extras)=>extras===false)) return false
+        const schema = this.schema
+        const $observable = this.$observable
+        for(const propname in schema) {
+            const propOb = $observable[propname](Observable)
+            propOb.update(src)
         }
-
-        let hasChildrenChanges = false
-        const ob = this.$observable
-        for(const propname in ob) {
-            const prop :Observable= ob[propname](Observable)
-            if(prop.update(src)) hasChildrenChanges = true
-        }
-
-        if(hasChildrenChanges) {
-            if(!evt){
-                evt = {
-                    value:this.value,
-                    old:this.old,
-                    sender : this.$observable,
-                    src: src
-                } 
-            } else evt.cancel = evt.stop = false
-            this.$publish(evt,false,(extras)=>extras===true)
-            if(evt.cancel) return false
-            if(evt.stop) return true
-        }
-        return (hasChildrenChanges || hasSelfChanges) && !cancelBubble
+        return true
     }
-    const ob = this.$observable? this.$observable : (this.$observable = create_observable(this))
-    if(!name && schema) name = schema.$name
-    this.name = name
-    this.type = ModelTypes.object
-    this.super= superOb
+    initObservable.call(this,inital,schema,name,superOb)
+    const Ob = this.$observable
     if(!is_object(inital)){
         inital = {}
-        if(superOb && name!==undefined) superOb.value[name] = inital
-    } 
-    this.value = this.old = inital
-
+    }
     if(schema){
         this.schema = schema
         for(const propname in schema) {
             const propValue = inital[propname]
             const Ob = new Observable(propValue,schema[propname],propname, this)
-            Object.defineProperty(ob,propValue,{enumerable:true,configurable:true,writable:false,value:Ob.$observable})
+            Object.defineProperty(observable,propValue,{enumerable:true,configurable:true,writable:false,value:Ob.$observable})
         }
     }else{
         schema = this.schema = new Schema(undefined,name,superOb?.schema)
         for(const propname in inital) {
             const propValue = inital[propname]
-            const Ob = new Observable(propValue,null,propname,this)
-            Object.defineProperty(ob,propValue,{enumerable:true,configurable:true,writable:false,value:Ob.$observable})
+            const propOb = new Observable(propValue,null,propname,this)
+            Object.defineProperty(Ob,propValue,{enumerable:true,configurable:true,writable:false,value:propOb.$observable})
         }
     }
 
 }
 
 export function ObservableArray(inital,schema:Schema,name:string,superOb:Observable){
-    if(!Subscription.isInstance(this)) subscribable(this)
+    
     this.get = function(){ 
         const result = []
         for(let i = 0,j= this.length.value;i<j;i++) {
@@ -1109,95 +1137,97 @@ export function ObservableArray(inital,schema:Schema,name:string,superOb:Observa
         }
         return result
      }
-    this._typeValue = (obj)=>is_array(obj)?obj:[]
+     this.set = function(value,src?):TObservableChange{
+        
+        const settingValue = value && value.push? value: []
+        this.value = value
+        const ob = this.$observable
+        const itemSchema = this.schema.item 
+        let hasChanges = false
+        const mod = observable.mode
+        observable.mode = ObservableModes.delay
+        this.length.set(settingValue.length)
+        for(let i = 0,j= settingValue.length;i<j;i++) {
+            const itemValue = settingValue[i]
+            let item:TObservable = ob[i]
+            let itemOb:Observable
+            let itemChange:TObservableChange
+            if(!item) {
+                itemOb = new Observable(itemValue,itemSchema,i as any as string,this)
+                item = itemOb.$observable
+                Object.defineProperty(ob,i as any as string,{enumerable:true,writable:false,configurable:true,value:itemOb})                
+                itemChange = {
+                    type: ObservableChangeTypes.appended,
+                    sender:item,
+                    old:undefined,
+                    value:item
+                }
+                itemOb.change = itemChange
+            } else {
+                itemOb = item(Observable)
+                itemChange = itemOb.set(itemValue)
+            }
+            if(itemChange){
+                sure_change.call(this,value,ObservableChangeTypes.changed,itemChange,i)
+                
+                hasChanges = true
+            }
+        }
+        
+        observable.mode = mod
+        if(hasChanges){
+            const change = this.change
+            if (src!==undefined ) this.update(src)
+            return change
+        }
+     }
+    
     // this.set = observable_setObject
     this.update = function(src?){
-        let hasSelfChanges = false,evt:TObservableEvent,old = this.old , value = this.value
-        if(old !== value){
-            this.old = value
-            evt = {
-                value:value,
-                old:old,
-                sender : this.$observable,
-                src: src
-            }
-            this.$publish(evt,false,(extras)=>extras===false)
-            if(evt.cancel) return false
-            if(evt.stop) return true
-            hasSelfChanges = true
-        }
+        if(!this.change) return false
+        const evt = this.change 
+        this.change = null
+        evt.src = src
+        if(this.$publish(evt,this)===false) return false
+
         const oldLength = this.length.old
-        const lengthResult = this.length.update(src)
-        if(lengthResult!==undefined) return lengthResult
-        
-        let hasChildrenChanges = false
+        const newLength = this.length.value
+        if(!this.length.update(src)) return false
         const ob = this.$observable
-        const appends =[]
-        const removes = []
-        for(let i =0,j=value.length;i<j;i++) {
-            const name = i.toString()
-            const prop_ob :TObservable= ob[name];
-            if(prop_ob) {
-                if(prop_ob(Observable).update(src)) hasChildrenChanges = true
-            }else{
-                const item = new Observable(value[i],this.item,name,this)
-                appends.push(item.$observable)
-                hasChildrenChanges = true
+        let hasChanges = false
+        for(let i =0,j=newLength;i<j;i++) {
+            const item = ob[i]
+            const itemOb = item(Observable)
+            if(itemOb.update(src))hasChanges=true
+        }
+        for(let i =newLength,j=oldLength;i<j;i++) {
+            const item = ob[i]
+            delete ob[i]
+            const itemOb = item(Observable)
+            if(itemOb.change) {
+                itemOb.change.type = ObservableChangeTypes.removed
+                if(itemOb.update(src))hasChanges=true
             }
-            
-        }
-        for(let i = value.length,j=oldLength;i<j;i++) {
-            const name = i.toString()
-            const prop_ob :TObservable= ob[name]
-            //TODO: update for remove
-            removes.push(prop_ob)
         }
 
-        
-        
-        
-        if(hasChildrenChanges) {
-            if(!evt){
-                evt = {
-                    value:this.value,
-                    old:this.old,
-                    sender : this.$observable,
-                    appends:appends,
-                    removes:removes,
-                    src: src
-                } 
-            } else evt.cancel = evt.stop = false
-            this.$publish(evt,false,(extras)=>extras===true)
-            if(evt.cancel) return false
-            if(evt.stop) return true
-        }
-        return hasChildrenChanges || hasSelfChanges
+        return hasChanges
     }
-    const ob = this.$observable? this.$observable : (this.$observable = create_observable(this))
-    if(!name && schema) name = schema.$name
-    this.name = name
+    let initialValue = inital || []
     this.type = ModelTypes.array
-    this.super= superOb
-    if(!is_object(inital)){
-        inital = {}
-        if(superOb && name!==undefined) superOb.value[name] = inital
-    } 
-    this.value = this.old = inital
+    initObservable.call(this,inital,schema,name,superOb)
+    const ob = this.$observable
 
-    if(schema){
-        this.schema = schema
-        for(const propname in schema) {
-            const propValue = inital[propname]
-            const Ob = new Observable(propValue,schema[propname],propname, this)
-            Object.defineProperty(ob,propValue,{enumerable:true,configurable:true,writable:false,value:Ob.$observable})
-        }
-    }else{
+    make_arrayObservable(ob,this)
+    make_arrayLength(initialValue.length,ob,this)
+    
+    if(!schema){
         schema = this.schema = new Schema(undefined,name,superOb?.schema)
-        for(const propname in inital) {
-            const propValue = inital[propname]
-            const Ob = new Observable(propValue,null,propname,this)
-            Object.defineProperty(ob,propValue,{enumerable:true,configurable:true,writable:false,value:Ob.$observable})
-        }
+    }
+    let itemSchema :Schema = schema.$asArray()
+    for(let i =0,j=initialValue.length;i<j;i++) {
+        const itemValue = initialValue[i]
+        const itemOb = new Observable(itemValue,itemSchema,i, this)
+        Object.defineProperty(ob,i,{enumerable:true,configurable:true,writable:false,value:itemOb.$observable})
     }
 
 }
@@ -1229,6 +1259,107 @@ function create_observable(info:Observable):TObservable{
     Object.defineProperty(ob,'$observable',{configurable:false,writable:false,enumerable:false,value:ob})
     Object.defineProperty(ob,'$Observable',{configurable:false,writable:false,enumerable:false,value:info})
     return ob as any
+}
+
+function sure_change(value,defaultType:ObservableChangeTypes,subChange?:TObservableChange,index?:any){
+    let change = this.change
+    if(this.change) {
+        change = this.change
+    }else {
+         change =  this.change = {
+            type:defaultType,
+            old: this.old,
+            value:value,
+            sender: this
+         }
+    }
+    change.value = value
+    if(subChange) {
+        const changes = change.changes || (change.changes={})
+        changes[index] = subChange
+    }
+    return change
+}
+
+function make_arrayLength(len:number,arr:TObservable,aOb:Observable){
+    const length = aOb.length = new Observable(len,null,'length',aOb)
+    Object.defineProperty(arr,'length',{enumerable:false,configurable:false,writable:false,value:length.$observable})
+    const set = length.set
+    length.set = function(len:number,src?):TObservableChange{
+        const old = Math.max(length.value,length.old)
+        if(len>old){
+            for(let i = old;i<len;i++) {
+                let item = arr[i]
+                if(!item) {
+                    const itemOb = new Observable(undefined,aOb.schema.$item,i,aOb)
+                    Object.defineProperty(arr,i,{enumerable:true,configurable:true,writable:false,value:itemOb.$observable})
+                }
+            }
+        }
+        const change = set.call(this,len,src)
+        return change
+    }
+}
+
+function make_arrayObservable(Ob:Observable,ob:TObservable){
+    ob.push = function(){
+        let len = Ob.length.value
+        for(const i in arguments) {
+            const itemValue = arguments[i]
+            const itemOb = new Observable(itemValue,Ob.schema.$item,len,Ob)
+            Object.defineProperty(ob,len,{enumerable:true,configurable:true,writable:false,value:itemOb.$observable})
+            len++
+        }
+        Ob.length.set(len)
+        return ob
+    } as any
+    ob.pop = function(token?){
+        let len = Ob.length.value
+        if(len===0){
+            if(token===Observable || token === observable) return NONE
+            return undefined
+        }
+        let lastItem = ob[len]
+        Ob.length.set(len-1)
+        if(token===Observable) return lastItem(Observable)
+        if(token===observable) return lastItem
+        return lastItem()
+    } as any
+    ob.unshift = function(){
+        let appendCount = arguments.length
+        let oldLen = Ob.length.value
+        let newLen = oldLen + appendCount
+        
+        
+        for(let appendIndex =newLen-1;appendIndex>=oldLen;appendIndex--) {
+            const existItem = ob[appendIndex-oldLen]
+            //构造出后面的item
+            const itemOb = new Observable(existItem(),Ob.schema.$item,appendIndex,Ob)
+            Object.defineProperty(ob,appendIndex,{enumerable:true,configurable:true,writable:false,value:itemOb.$observable})
+        }
+        for(let i = oldLen;i>=appendCount;i--){
+            const oldPosItem = ob[i-appendCount]
+            const newPosItem = ob[i]
+            newPosItem(oldPosItem())
+        }
+        for(let i =0;i<appendCount;i++){
+            ob[i](arguments[i])
+        }
+        Ob.length.set(newLen)
+        return ob
+    } as any
+    ob.shift = function(){
+        let len = Ob.length.value
+        if(len===0){
+            return undefined
+        }
+        const first = ob[0]
+        for(let i =1;i<len;i++){
+            ob[i-1](ob[i]())
+        }
+        Ob.length.set(len-1)
+        return ob
+    }
 }
 
 

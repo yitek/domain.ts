@@ -102,6 +102,7 @@ export declare function rid(prefix?: string): string;
 export declare const NONE: any;
 export declare const REMOVE: any;
 export declare const USEAPPLY: any;
+export declare function nextTick(handler: any, append?: any): number;
 export declare function disposable(target: any): any;
 export declare class Disposiable {
     $disposed?: boolean;
@@ -189,15 +190,31 @@ export declare type TObservable = {
     (value?: any, capture?: boolean, disposor?: any): any;
     '$Observable': Observable;
     $observable: TObservable;
+} & {
+    length?: TObservable;
+    push?: (...args: any[]) => TObservable;
+    pop?: (token?: any) => any;
+    unshift?: (...args: any[]) => TObservable;
+    shift?: (token?: any) => any;
+    remove?: (at: number) => any;
+    insert?: (at: number) => TObservable;
 };
-export declare type TObservableEvent = {
+export declare enum ObservableChangeTypes {
+    nochanges = 0,
+    setted = 1,
+    changed = 2,
+    appended = 3,
+    removed = 4
+}
+export declare type TObservableChange = {
+    type: ObservableChangeTypes;
     value?: any;
     old?: any;
     src?: any;
     sender?: TObservable;
-    removes?: TObservable[];
-    appends?: TObservable[];
-    removed?: boolean;
+    changes?: {
+        [index: string]: TObservableChange;
+    };
     cancel?: boolean;
     stop?: boolean;
 };
@@ -206,23 +223,15 @@ export declare class Observable extends Subscription {
     name: string;
     old: any;
     value: any;
+    change: TObservableChange;
     schema: Schema;
     super?: Observable;
-    deps?: Observable[];
-    dep_handler?: (evt: TObservableEvent) => any;
     $observable: TObservable;
-    listeners?: {
-        (evt: TObservableEvent): any;
-    }[];
-    captures?: {
-        (evt: TObservableEvent): any;
-    }[];
-    hasChanges?: number;
     length?: Observable;
-    constructor(initial: any, schema: Schema, name: string, superOb: Observable);
-    set(value: any, src?: any): Observable;
+    constructor(initial: any, schema: Schema, name: string | number, superOb: Observable);
+    set(value: any, src?: any): TObservableChange;
     get(): any;
-    update(src: any): any;
+    update(src: any): TObservableChange;
 }
 export declare function ObservableValue(inital: any, schema: Schema, name: string, superOb: Observable): void;
 export declare function ObservableObject(inital: any, schema: Schema, name: string, superOb: Observable): void;

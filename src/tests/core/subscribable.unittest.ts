@@ -1,7 +1,6 @@
 import {testable} from '../../YA.unittest'
 import {Disposiable, subscribable, Subscription} from '../../YA.core'
 
-//
 testable('core.subscribable',{
     '基本用法':(ASSERT)=>{
         const target:any = {}
@@ -34,7 +33,6 @@ testable('core.subscribable',{
             listenerEventArg3 = evt3
         }
         target.$subscribe(listener)
-        debugger
         target.$publish(5,3)
         ASSERT({
             '$publish可以通过第二个参数来传递第二个参数':()=>listenerEventArg1===5 && listenerEventArg2===3

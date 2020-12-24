@@ -492,6 +492,34 @@ var __decorate = (this && this.__decorate) || function (decorators, target, key,
         get: function () { return undefined; },
         set: function () { return this; }
     });
+    var nextTickHandlers = [];
+    var nextTickTimer;
+    function nextTick(handler, append) {
+        if (append === false) {
+            var c = 0;
+            for (var i = 0, j = nextTickHandlers.length; i < j; i++) {
+                var existed = nextTickHandlers.shift();
+                if (existed !== handler)
+                    nextTickHandlers.push(existed);
+                else
+                    c++;
+            }
+            return c;
+        }
+        nextTickHandlers.push(handler);
+        if (!nextTickTimer)
+            nextTickTimer = setTimeout(function () {
+                var handlers = nextTickHandlers;
+                nextTickHandlers = [];
+                for (var i = 0, j = handlers.length; i < j; i++) {
+                    var handler_1 = handlers.shift();
+                    handler_1();
+                }
+                if (nextTickHandlers.length === 0)
+                    nextTickTimer = 0;
+            }, 0);
+    }
+    exports.nextTick = nextTick;
     var dispose = function (handler) {
         if (handler === undefined) {
             var disposeHandlers_1 = this['--disposes--'];
@@ -546,7 +574,12 @@ var __decorate = (this && this.__decorate) || function (decorators, target, key,
                         return this;
                     if (extras === undefined)
                         extras = this;
-                    handlers['--fulfill-use-apply--'] ? handler.apply(extras, handlers['--fulfill-value--']) : handler.call(extras, handlers['--fulfill-value--']);
+                    if (handlers['--fulfill-use-apply--'])
+                        handler.apply(extras, handlers['--fulfill-value--']);
+                    else if (handlers['--fulfill-value1--'] === undefined)
+                        handler.call(extras, handlers['--fulfill-value--']);
+                    else
+                        handler.call(extras, handlers['--fulfill-value--'], handlers['--fulfill-value1--']);
                     return this;
                 }
                 var callbacker = {
@@ -1058,168 +1091,143 @@ var __decorate = (this && this.__decorate) || function (decorators, target, key,
             throw new Exception('schemaBuilder不可以在schemaBuilder上做赋值操作');
         }
     };
+    var ObservableChangeTypes;
+    (function (ObservableChangeTypes) {
+        ObservableChangeTypes[ObservableChangeTypes["nochanges"] = 0] = "nochanges";
+        ObservableChangeTypes[ObservableChangeTypes["setted"] = 1] = "setted";
+        ObservableChangeTypes[ObservableChangeTypes["changed"] = 2] = "changed";
+        ObservableChangeTypes[ObservableChangeTypes["appended"] = 3] = "appended";
+        ObservableChangeTypes[ObservableChangeTypes["removed"] = 4] = "removed";
+    })(ObservableChangeTypes = exports.ObservableChangeTypes || (exports.ObservableChangeTypes = {}));
     var Observable = /** @class */ (function (_super) {
         __extends(Observable, _super);
         function Observable(initial, schema, name, superOb) {
-            var _this = _super.call(this) || this;
-            if (!schema)
-                schema = new Schema(initial);
-            if (name === undefined)
-                name = schema.$name;
-            _this.name = name;
-            _this.super = superOb;
-            _this.hasChanges = 0;
-            return _this;
+            return _super.call(this) || this;
         }
         Observable.prototype.set = function (value, src) {
-            if (this.value === value)
-                return this;
-            if (src !== undefined)
-                this.update(src);
-            return this;
+            throw 'abstract method.';
         };
         Observable.prototype.get = function () {
             return this.value;
         };
-        Observable.prototype.update = function (src) {
-            if (this.value === this.old)
-                return;
-            var evt = {
-                value: this.value,
-                old: this.old,
-                sender: this.$observable,
-                src: src
-            };
-            this.$publish(evt, false, function (extras) { return extras === false; });
-            if (evt.cancel)
-                return false;
-            return true;
-        };
+        Observable.prototype.update = function (src) { throw 'abstract method.'; };
         return Observable;
     }(Subscription));
     exports.Observable = Observable;
-    function ObservableValue(inital, schema, name, superOb) {
+    function initObservable(inital, schema, name, superOb) {
         var _a;
-        if (!this.update && !this.set)
-            for (var n in Observable.prototype)
-                this[n] = Observable.prototype[n];
-        this.type = ModelTypes.value;
+        if (!this.$publish)
+            Subscription.call(this);
         if (!name && schema)
             name = schema.$name;
         this.name = name;
         this.schema = schema || new Schema(undefined, name, (_a = superOb) === null || _a === void 0 ? void 0 : _a.schema);
         this.super = superOb;
+        this.$observable = create_observable(this);
         this.value = this.old = inital;
+    }
+    function ObservableValue(inital, schema, name, superOb) {
+        this.type = ModelTypes.value;
+        initObservable.call(this, inital, schema, name, superOb);
+        this.set = function (value, src) {
+            if (this.value === value)
+                return this;
+            sure_change.call(this, value, ObservableChangeTypes.setted);
+            if (src !== undefined)
+                this.update(src);
+            return this.change;
+        };
+        this.update = function (src) {
+            if (!this.change)
+                return false;
+            var evt = this.change;
+            this.change = null;
+            this.old = this.value;
+            evt.src = src;
+            if (this.$publish(evt, this, function (extras) { return extras === false; }))
+                return false;
+            return true;
+        };
     }
     exports.ObservableValue = ObservableValue;
     function ObservableObject(inital, schema, name, superOb) {
         var _a;
-        if (!Subscription.isInstance(this))
-            subscribable(this);
-        this.get = function () { return this.value; };
-        this._typeValue = function (obj) { return is_object(obj) ? obj : {}; };
+        this.get = function () {
+            var result = {};
+            var $observable = this.$observable;
+            for (var propname in this.schema) {
+                result[propname] = $observable[propname]();
+            }
+            return result;
+        };
         this.set = function (value, src) {
-            if (!value)
-                value = {};
-            if (this.super && this.name && value !== this.value)
-                this.super.value[this.name] = value;
+            var settingValue = value || {};
             this.value = value;
             var ob = this.$observable;
+            var schema = this.schema;
             var mod = observable.mode;
             observable.mode = ObservableModes.delay;
-            for (var propname in ob) {
+            var hasChanges = false;
+            for (var propname in schema) {
                 var prop = ob[propname];
-                var propValue = value[propname];
-                if (propValue === undefined)
-                    propValue = exports.NONE;
-                prop(propValue);
+                var propOb = prop(Observable);
+                var propValue = settingValue[propname];
+                var propChange = propOb.set(propValue);
+                if (propChange) {
+                    var change = sure_change.call(this, value, ObservableChangeTypes.changed, propChange, propname);
+                    hasChanges = true;
+                }
             }
             observable.mode = mod;
-            if (src !== undefined)
-                this.update(src);
-            return this;
+            if (hasChanges) {
+                var change = this.change;
+                if (src !== undefined)
+                    this.update(src);
+                return change;
+            }
         };
         this.update = function (src) {
-            var hasSelfChanges = false;
-            var evt, old = this.old, value = this.value;
-            var cancelBubble = false;
-            if (old !== value) {
-                this.old = value;
-                evt = {
-                    value: value,
-                    old: old,
-                    sender: this.$observable,
-                    src: src
-                };
-                if (this.$publish(evt, false, function (extras) { return extras === false; }) === false)
-                    return false;
-                // 不再向上传播
-                if (evt.cancel)
-                    cancelBubble = true;
-                if (evt.stop)
-                    return true;
-                hasSelfChanges = true;
+            if (!this.change)
+                return false;
+            var evt = this.change;
+            evt.src = src;
+            this.change = null;
+            this.old = this.value;
+            if (this.$publish(evt, this, function (extras) { return extras === false; }))
+                return false;
+            var schema = this.schema;
+            var $observable = this.$observable;
+            for (var propname in schema) {
+                var propOb = $observable[propname](Observable);
+                propOb.update(src);
             }
-            var hasChildrenChanges = false;
-            var ob = this.$observable;
-            for (var propname in ob) {
-                var prop = ob[propname](Observable);
-                if (prop.update(src))
-                    hasChildrenChanges = true;
-            }
-            if (hasChildrenChanges) {
-                if (!evt) {
-                    evt = {
-                        value: this.value,
-                        old: this.old,
-                        sender: this.$observable,
-                        src: src
-                    };
-                }
-                else
-                    evt.cancel = evt.stop = false;
-                this.$publish(evt, false, function (extras) { return extras === true; });
-                if (evt.cancel)
-                    return false;
-                if (evt.stop)
-                    return true;
-            }
-            return (hasChildrenChanges || hasSelfChanges) && !cancelBubble;
+            return true;
         };
-        var ob = this.$observable ? this.$observable : (this.$observable = create_observable(this));
-        if (!name && schema)
-            name = schema.$name;
-        this.name = name;
-        this.type = ModelTypes.object;
-        this.super = superOb;
+        initObservable.call(this, inital, schema, name, superOb);
+        var Ob = this.$observable;
         if (!is_object(inital)) {
             inital = {};
-            if (superOb && name !== undefined)
-                superOb.value[name] = inital;
         }
-        this.value = this.old = inital;
         if (schema) {
             this.schema = schema;
             for (var propname in schema) {
                 var propValue = inital[propname];
-                var Ob = new Observable(propValue, schema[propname], propname, this);
-                Object.defineProperty(ob, propValue, { enumerable: true, configurable: true, writable: false, value: Ob.$observable });
+                var Ob_1 = new Observable(propValue, schema[propname], propname, this);
+                Object.defineProperty(observable, propValue, { enumerable: true, configurable: true, writable: false, value: Ob_1.$observable });
             }
         }
         else {
             schema = this.schema = new Schema(undefined, name, (_a = superOb) === null || _a === void 0 ? void 0 : _a.schema);
             for (var propname in inital) {
                 var propValue = inital[propname];
-                var Ob = new Observable(propValue, null, propname, this);
-                Object.defineProperty(ob, propValue, { enumerable: true, configurable: true, writable: false, value: Ob.$observable });
+                var propOb = new Observable(propValue, null, propname, this);
+                Object.defineProperty(Ob, propValue, { enumerable: true, configurable: true, writable: false, value: propOb.$observable });
             }
         }
     }
     exports.ObservableObject = ObservableObject;
     function ObservableArray(inital, schema, name, superOb) {
         var _a;
-        if (!Subscription.isInstance(this))
-            subscribable(this);
         this.get = function () {
             var result = [];
             for (var i = 0, j = this.length.value; i < j; i++) {
@@ -1228,100 +1236,96 @@ var __decorate = (this && this.__decorate) || function (decorators, target, key,
             }
             return result;
         };
-        this._typeValue = function (obj) { return is_array(obj) ? obj : []; };
-        // this.set = observable_setObject
-        this.update = function (src) {
-            var hasSelfChanges = false, evt, old = this.old, value = this.value;
-            if (old !== value) {
-                this.old = value;
-                evt = {
-                    value: value,
-                    old: old,
-                    sender: this.$observable,
-                    src: src
-                };
-                this.$publish(evt, false, function (extras) { return extras === false; });
-                if (evt.cancel)
-                    return false;
-                if (evt.stop)
-                    return true;
-                hasSelfChanges = true;
-            }
-            var oldLength = this.length.old;
-            var lengthResult = this.length.update(src);
-            if (lengthResult !== undefined)
-                return lengthResult;
-            var hasChildrenChanges = false;
+        this.set = function (value, src) {
+            var settingValue = value && value.push ? value : [];
+            this.value = value;
             var ob = this.$observable;
-            var appends = [];
-            var removes = [];
-            for (var i = 0, j = value.length; i < j; i++) {
-                var name_4 = i.toString();
-                var prop_ob = ob[name_4];
-                if (prop_ob) {
-                    if (prop_ob(Observable).update(src))
-                        hasChildrenChanges = true;
+            var itemSchema = this.schema.item;
+            var hasChanges = false;
+            var mod = observable.mode;
+            observable.mode = ObservableModes.delay;
+            this.length.set(settingValue.length);
+            for (var i = 0, j = settingValue.length; i < j; i++) {
+                var itemValue = settingValue[i];
+                var item = ob[i];
+                var itemOb = void 0;
+                var itemChange = void 0;
+                if (!item) {
+                    itemOb = new Observable(itemValue, itemSchema, i, this);
+                    item = itemOb.$observable;
+                    Object.defineProperty(ob, i, { enumerable: true, writable: false, configurable: true, value: itemOb });
+                    itemChange = {
+                        type: ObservableChangeTypes.appended,
+                        sender: item,
+                        old: undefined,
+                        value: item
+                    };
+                    itemOb.change = itemChange;
                 }
                 else {
-                    var item = new Observable(value[i], this.item, name_4, this);
-                    appends.push(item.$observable);
-                    hasChildrenChanges = true;
+                    itemOb = item(Observable);
+                    itemChange = itemOb.set(itemValue);
+                }
+                if (itemChange) {
+                    sure_change.call(this, value, ObservableChangeTypes.changed, itemChange, i);
+                    hasChanges = true;
                 }
             }
-            for (var i = value.length, j = oldLength; i < j; i++) {
-                var name_5 = i.toString();
-                var prop_ob = ob[name_5];
-                //TODO: update for remove
-                removes.push(prop_ob);
+            observable.mode = mod;
+            if (hasChanges) {
+                var change = this.change;
+                if (src !== undefined)
+                    this.update(src);
+                return change;
             }
-            if (hasChildrenChanges) {
-                if (!evt) {
-                    evt = {
-                        value: this.value,
-                        old: this.old,
-                        sender: this.$observable,
-                        appends: appends,
-                        removes: removes,
-                        src: src
-                    };
-                }
-                else
-                    evt.cancel = evt.stop = false;
-                this.$publish(evt, false, function (extras) { return extras === true; });
-                if (evt.cancel)
-                    return false;
-                if (evt.stop)
-                    return true;
-            }
-            return hasChildrenChanges || hasSelfChanges;
         };
-        var ob = this.$observable ? this.$observable : (this.$observable = create_observable(this));
-        if (!name && schema)
-            name = schema.$name;
-        this.name = name;
+        // this.set = observable_setObject
+        this.update = function (src) {
+            if (!this.change)
+                return false;
+            var evt = this.change;
+            this.change = null;
+            evt.src = src;
+            if (this.$publish(evt, this) === false)
+                return false;
+            var oldLength = this.length.old;
+            var newLength = this.length.value;
+            if (!this.length.update(src))
+                return false;
+            var ob = this.$observable;
+            var hasChanges = false;
+            for (var i = 0, j = newLength; i < j; i++) {
+                var item = ob[i];
+                var itemOb = item(Observable);
+                if (itemOb.update(src))
+                    hasChanges = true;
+            }
+            for (var i = newLength, j = oldLength; i < j; i++) {
+                var item = ob[i];
+                delete ob[i];
+                var itemOb = item(Observable);
+                if (itemOb.change) {
+                    itemOb.change.type = ObservableChangeTypes.removed;
+                    if (itemOb.update(src))
+                        hasChanges = true;
+                }
+            }
+            return hasChanges;
+        };
+        var initialValue = inital || [];
         this.type = ModelTypes.array;
-        this.super = superOb;
-        if (!is_object(inital)) {
-            inital = {};
-            if (superOb && name !== undefined)
-                superOb.value[name] = inital;
-        }
-        this.value = this.old = inital;
-        if (schema) {
-            this.schema = schema;
-            for (var propname in schema) {
-                var propValue = inital[propname];
-                var Ob = new Observable(propValue, schema[propname], propname, this);
-                Object.defineProperty(ob, propValue, { enumerable: true, configurable: true, writable: false, value: Ob.$observable });
-            }
-        }
-        else {
+        initObservable.call(this, inital, schema, name, superOb);
+        var ob = this.$observable;
+        make_arrayObservable(ob, this);
+        make_arrayLength(initialValue.length, ob, this);
+        if (!schema) {
             schema = this.schema = new Schema(undefined, name, (_a = superOb) === null || _a === void 0 ? void 0 : _a.schema);
-            for (var propname in inital) {
-                var propValue = inital[propname];
-                var Ob = new Observable(propValue, null, propname, this);
-                Object.defineProperty(ob, propValue, { enumerable: true, configurable: true, writable: false, value: Ob.$observable });
-            }
+        }
+        var itemSchema = schema.$asArray();
+        for (var i = 0, j = initialValue.length; i < j; i++) {
+            var itemValue = initialValue[i];
+            var itemOb = new Observable(itemValue, itemSchema, i, this);
+            Object.defineProperty(ob, i, { enumerable: true, configurable: true, writable: false, value: itemOb.$observable });
         }
     }
     exports.ObservableArray = ObservableArray;
@@ -1359,6 +1363,106 @@ var __decorate = (this && this.__decorate) || function (decorators, target, key,
         Object.defineProperty(ob, '$observable', { configurable: false, writable: false, enumerable: false, value: ob });
         Object.defineProperty(ob, '$Observable', { configurable: false, writable: false, enumerable: false, value: info });
         return ob;
+    }
+    function sure_change(value, defaultType, subChange, index) {
+        var change = this.change;
+        if (this.change) {
+            change = this.change;
+        }
+        else {
+            change = this.change = {
+                type: defaultType,
+                old: this.old,
+                value: value,
+                sender: this
+            };
+        }
+        change.value = value;
+        if (subChange) {
+            var changes = change.changes || (change.changes = {});
+            changes[index] = subChange;
+        }
+        return change;
+    }
+    function make_arrayLength(len, arr, aOb) {
+        var length = aOb.length = new Observable(len, null, 'length', aOb);
+        Object.defineProperty(arr, 'length', { enumerable: false, configurable: false, writable: false, value: length.$observable });
+        var set = length.set;
+        length.set = function (len, src) {
+            var old = Math.max(length.value, length.old);
+            if (len > old) {
+                for (var i = old; i < len; i++) {
+                    var item = arr[i];
+                    if (!item) {
+                        var itemOb = new Observable(undefined, aOb.schema.$item, i, aOb);
+                        Object.defineProperty(arr, i, { enumerable: true, configurable: true, writable: false, value: itemOb.$observable });
+                    }
+                }
+            }
+            var change = set.call(this, len, src);
+            return change;
+        };
+    }
+    function make_arrayObservable(Ob, ob) {
+        ob.push = function () {
+            var len = Ob.length.value;
+            for (var i in arguments) {
+                var itemValue = arguments[i];
+                var itemOb = new Observable(itemValue, Ob.schema.$item, len, Ob);
+                Object.defineProperty(ob, len, { enumerable: true, configurable: true, writable: false, value: itemOb.$observable });
+                len++;
+            }
+            Ob.length.set(len);
+            return ob;
+        };
+        ob.pop = function (token) {
+            var len = Ob.length.value;
+            if (len === 0) {
+                if (token === Observable || token === observable)
+                    return exports.NONE;
+                return undefined;
+            }
+            var lastItem = ob[len];
+            Ob.length.set(len - 1);
+            if (token === Observable)
+                return lastItem(Observable);
+            if (token === observable)
+                return lastItem;
+            return lastItem();
+        };
+        ob.unshift = function () {
+            var appendCount = arguments.length;
+            var oldLen = Ob.length.value;
+            var newLen = oldLen + appendCount;
+            for (var appendIndex = newLen - 1; appendIndex >= oldLen; appendIndex--) {
+                var existItem = ob[appendIndex - oldLen];
+                //构造出后面的item
+                var itemOb = new Observable(existItem(), Ob.schema.$item, appendIndex, Ob);
+                Object.defineProperty(ob, appendIndex, { enumerable: true, configurable: true, writable: false, value: itemOb.$observable });
+            }
+            for (var i = oldLen; i >= appendCount; i--) {
+                var oldPosItem = ob[i - appendCount];
+                var newPosItem = ob[i];
+                newPosItem(oldPosItem());
+            }
+            for (var i = 0; i < appendCount; i++) {
+                ob[i](arguments[i]);
+            }
+            Ob.length.set(newLen);
+            return ob;
+        };
+        ob.shift = function () {
+            var len = Ob.length.value;
+            if (len === 0) {
+                return undefined;
+            }
+            var first = ob[0];
+            for (var i = 1; i < len; i++) {
+                ob[i - 1](ob[i]());
+            }
+            Ob.length.set(len - 1);
+            return ob;
+        };
     }
     var ObservableModes;
     (function (ObservableModes) {
