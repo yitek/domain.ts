@@ -16,7 +16,6 @@ export class Logger{
 Logger.default = new Logger()
 
 
-const codeTrimRegx = /(^[;\s]+)|([;\s]+$)/g
 
 export type TExecutable = {
     execute(logger:Logger,self?:any):any

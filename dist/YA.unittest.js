@@ -63,7 +63,6 @@ var __extends = (this && this.__extends) || (function () {
     }());
     exports.Logger = Logger;
     Logger.default = new Logger();
-    var codeTrimRegx = /(^[;\s]+)|([;\s]+$)/g;
     var Statement = /** @class */ (function () {
         function Statement(content) {
             this.content = content;

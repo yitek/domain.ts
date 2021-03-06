@@ -1214,7 +1214,7 @@ var __decorate = (this && this.__decorate) || function (decorators, target, key,
         init_observable.call(this, inital, schema, name, superOb);
         this.set = function (value, src) {
             if (this.value === value)
-                return this;
+                return;
             this.value = value;
             sure_change(this, value, ObservableChangeTypes.setted);
             if (src !== undefined)

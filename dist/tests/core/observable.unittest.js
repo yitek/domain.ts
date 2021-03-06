@@ -72,6 +72,37 @@
         },
         '对象上的事件传播': function (ASSERT) {
             var now = new Date();
+            var ob = YA_core_1.observable({
+                filters: {
+                    createTime: { min: null, max: now },
+                    keyword: 'yiy',
+                }
+            });
+            var rootChange;
+            ob.$subscribe(function (change) { return rootChange = change; });
+            var filterChange;
+            ob.filters.$subscribe(function (change) { return filterChange = change; });
+            var createChange;
+            ob.filters.createTime.$subscribe(function (change) {
+                createChange = change;
+                change.stop = true;
+            });
+            var maxChange;
+            ob.createTime.max.$subscribe(function (change) { return maxChange = change; });
+            ob({
+                filters: {
+                    keyword: 'yi',
+                    createTime: { min: '2020-12-25', max: now }
+                }
+            }, true);
+            ASSERT({
+                '修改后本身与下级属性上的监听函数都将被通知': function () { return filterChange !== undefined && createChange !== undefined; },
+                '由于create设置了stop,其后下级属性不再得到通知': function () { return maxChange === undefined; },
+                '没有通知，但值已经赋予了': function () { return ob.filters.createTime.min() === '2020-12-25'; }
+            });
+        },
+        '对象上的事件冒泡与传播': function (ASSERT) {
+            var now = new Date();
             debugger;
             var ob = YA_core_1.observable({
                 filters: {
@@ -107,7 +138,7 @@
                 '事件先向上传播，然后向下传播': function () { return rootChange !== undefined && createTimeChange !== undefined; }
             });
         },
-        '对象上的事件冒泡1': function (ASSERT) {
+        '嘻嘻嘻': function (ASSERT) {
             var now = new Date();
             var schema = new YA_core_1.Schema({
                 filters: {

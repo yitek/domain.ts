@@ -731,9 +731,8 @@ export class InjectScope extends Disposiable{
 export class Activator{
     ctorArgs:string[]
     depProps:{[propname:string]:string}
-    constructor(public ctor:{new(...args):any}){
+    constructor(public ctor:{new(...args):any}){}
 
-    }
     prop(propname:string|{[pname:string]:string}|string[],depname?:string):Activator{
         if(!this.depProps) this.depProps={}
         if(depname===undefined){
@@ -1099,7 +1098,7 @@ export function ObservableValue(inital,schema:Schema,name:string,superOb:Observa
     init_observable.call(this,inital,schema,name,superOb)
     
     this.set = function(value ,src?){
-        if(this.value===value) return this
+        if(this.value===value) return
         this.value = value
         sure_change(this,value,ObservableChangeTypes.setted)
         if(src!==undefined) this.update(src)

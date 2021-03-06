@@ -63,10 +63,41 @@ export default testable('core.observable',{
             '如果修改了属性值，所有上级对象都会接收到捕捉的事件':()=>keywordChange!==undefined && filterChange !==undefined ,
             '由于filters的捕捉函数设置了cancel，所以事件不再向上冒泡':()=>rootChange ===undefined
         })
-        
-        
     },
     '对象上的事件传播':(ASSERT)=>{
+        const now = new Date()
+        const ob = observable({
+            filters: {
+                createTime:{min:null,max:now},
+                keyword:'yiy',
+                
+            }
+        })
+        let rootChange: TObservableChange
+        ob.$subscribe((change:TObservableChange)=>rootChange = change)
+        let filterChange:TObservableChange
+        ob.filters.$subscribe((change:TObservableChange)=>filterChange=change)
+        let createChange :TObservableChange
+        ob.filters.createTime.$subscribe((change:TObservableChange)=>{
+            createChange = change
+            change.stop = true
+        })
+        let maxChange :TObservableChange
+        ob.createTime.max.$subscribe((change:TObservableChange)=>maxChange= change)
+        
+        ob({
+            filters:{
+                keyword:'yi',
+                createTime: {min:'2020-12-25',max:now}
+            }
+        },true)
+        ASSERT({
+            '修改后本身与下级属性上的监听函数都将被通知':()=>filterChange!==undefined && createChange !==undefined ,
+            '由于create设置了stop,其后下级属性不再得到通知':()=>maxChange ===undefined,
+            '没有通知，但值已经赋予了':()=>ob.filters.createTime.min() === '2020-12-25'
+        })  
+    },
+    '对象上的事件冒泡与传播':(ASSERT)=>{
         const now = new Date()
         debugger
         const ob = observable({
@@ -106,7 +137,7 @@ export default testable('core.observable',{
         
         
     },
-    '对象上的事件冒泡1':(ASSERT)=>{
+    '嘻嘻嘻':(ASSERT)=>{
         const now = new Date()
         const schema = new Schema({
             filters:{
